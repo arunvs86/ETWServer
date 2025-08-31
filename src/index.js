@@ -293,6 +293,8 @@ app.use((err, req, res, next) => {
 });
 
 
+console.log('Loaded MONGO_URI =', (process.env.MONGO_URI || '').replace(/\/\/[^:]+:[^@]+@/,'//<user>:<pw>@'));
+
 // start
 connectDB(process.env.MONGO_URI)
   .then(() => app.listen(process.env.PORT, () => console.log(`API on http://localhost:${process.env.PORT}`)))
