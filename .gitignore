@@ -1,0 +1,15 @@
+cat > .gitignore <<'EOF'
+# Node
+node_modules/
+npm-debug.log*
+yarn.lock
+pnpm-lock.yaml
+
+# Env & local data
+.env
+.env.*
+uploads/
+coverage/
+dist/
+.DS_Store
+EOF

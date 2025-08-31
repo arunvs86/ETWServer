@@ -1,0 +1,51 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node src/index.js",
+    "smoke:user": "node src/scripts/smoke-user.js",
+    "smoke:course": "node src/scripts/smoke-course.js",
+    "smoke:section": "node src/scripts/smoke-section.js",
+    "smoke:lesson": "node src/scripts/smoke-lesson.js",
+    "smoke:enroll": "node src/scripts/smoke-enrollment.js",
+    "smoke:membership": "node src/scripts/smoke-membership.js",
+    "smoke:order": "node src/scripts/smoke-order.js",
+    "smoke:progress": "node src/scripts/smoke-progress.js",
+    "smoke:review": "node src/scripts/smoke-review.js",
+    "smoke:instructor": "node src/scripts/smoke-instructor.js",
+    "smoke:livesession": "node src/scripts/smoke-livesession.js",
+    "smoke:attendance": "node src/scripts/smoke-attendance.js",
+    "smoke:library": "node src/scripts/smoke-library.js",
+    "smoke:wishlist": "node src/scripts/smoke-wishlist.js",
+    "smoke:thread": "node src/scripts/smoke-discussion-thread.js",
+    "smoke:post": "node src/scripts/smoke-discussion-post.js",
+    "smoke:msg": "node src/scripts/smoke-messaging.js",
+    "smoke:quiz": "node src/scripts/smoke-quiz.js",
+    "smoke:quiz-attempt": "node src/scripts/smoke-quiz-attempt.js",
+    "smoke:google-user": "node src/scripts/smoke-google-user.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "argon2": "^0.44.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "google-auth-library": "^10.2.1",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.17.1",
+    "morgan": "^1.10.1",
+    "multer": "^2.0.2",
+    "stripe": "^18.4.0",
+    "zod": "^4.0.17"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}
