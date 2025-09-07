@@ -18,6 +18,13 @@ function newJti() {
 exports.googleSignIn = async (req, res, next) => {
   try {
     const { idToken } = GoogleSignInBody.parse(req.body);
+    const refreshCookieOpts = {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none',
+      path: '/auth',
+      maxAge: 1000 * Number(process.env.JWT_REFRESH_TTL || 2592000),
+    };
 
     // 1) Verify the Google ID token
     const ticket = await googleClient.verifyIdToken({
@@ -63,13 +70,7 @@ exports.googleSignIn = async (req, res, next) => {
     });
 
     // set HttpOnly refresh cookie
-    res.cookie('rt', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 1000 * Number(process.env.JWT_REFRESH_TTL || 2592000),
-      path: '/auth'
-    });
+    res.cookie('rt', refreshToken,refreshCookieOpts)
 
     user.lastLoginAt = new Date();
     await user.save();
@@ -125,7 +126,15 @@ exports.refresh = async (req, res, next) => {
           // ignore bad/expired refresh tokens on logout
         }
       }
-      res.clearCookie('rt', { path: '/auth' });
+      const refreshCookieOpts = {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'none',
+        path: '/auth',
+        maxAge: 1000 * Number(process.env.JWT_REFRESH_TTL || 2592000),
+      };
+
+      res.clearCookie('rt',{...refreshCookieOpts} ,{ path: '/auth' });
       return res.status(204).end();
     } catch (err) {
       return next(err);
@@ -145,14 +154,16 @@ exports.refresh = async (req, res, next) => {
       ip: req.ip || req.headers['x-forwarded-for'] || '',
       expiresAt: new Date(Date.now() + 1000 * Number(process.env.JWT_REFRESH_TTL || 2592000))
     });
-  
-    res.cookie('rt', refreshToken, {
+
+    const refreshCookieOpts = {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: true,
+      sameSite: 'none',
+      path: '/auth',
       maxAge: 1000 * Number(process.env.JWT_REFRESH_TTL || 2592000),
-      path: '/auth'
-    });
+    };
+  
+    res.cookie('rt', refreshToken, refreshCookieOpts);
   
     return accessToken;
   }
