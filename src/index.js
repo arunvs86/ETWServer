@@ -229,6 +229,8 @@ app.use((req, res, next) => {
   if (req.path.startsWith('/webhooks/stripe')) return next();
   return devAuth(req, res, next); // no NODE_ENV check for demo
 });
+console.log('[server] mounting /api me.quizAttempts.routes');
+app.use('/api', require('./routes/me.quizAttempts.routes'));
 
 // static files for uploaded media
 app.use('/files', express.static(path.join(__dirname, '..', 'uploads')));
@@ -259,6 +261,7 @@ app.use('/learn', require('./routes/learn.routes'));
 
 app.use('/api', require('./routes/public.quiz.routes'));
 app.use('/api', require('./routes/public.quizPlay.routes'));
+app.use('/api', require('./routes/me.quizAttempts.routes'));
 
 // LIVE SESSIONS
 const liveSessionRoutes = require('./routes/liveSession.routes');
