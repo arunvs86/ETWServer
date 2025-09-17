@@ -1,31 +1,9 @@
-// // services/livePurchase.service.js
-// const { Types } = require('mongoose');
-// const LiveSessionAccess = require('../models/LiveSessionAccess');
-// const LiveSession = require('../models/LiveSession');
-
-// async function grantLiveSessionAfterPayment({ userId, liveSessionId, session }) {
-//   if (!Types.ObjectId.isValid(userId) || !Types.ObjectId.isValid(liveSessionId)) return false;
-
-//   const exists = await LiveSession.findById(liveSessionId).select('_id').lean();
-//   if (!exists) return false;
-
-//   await LiveSessionAccess.updateOne(
-//     { userId, sessionId: liveSessionId },
-//     {
-//       $setOnInsert: { userId, sessionId: liveSessionId, source: 'purchase' },
-//       $set: { orderId: session?.payment_intent || session?.id },
-//     },
-//     { upsert: true }
-//   );
-//   return true;
-// }
-
-// module.exports = { grantLiveSessionAfterPayment };
-
-// src/services/livePurchase.service.js
 const Stripe = require('stripe');
 const crypto = require('crypto');
 const { Types } = require('mongoose');
+const User = require('../models/User');                  
+const { sendLiveEmail } = require('./notifyPurchase');   
+
 
 const LiveSession = require('../models/LiveSession');
 const LiveSessionAccess = require('../models/LiveSessionAccess');
@@ -160,6 +138,35 @@ async function join({ sessionId, userId }) {
   return { ok: true, url: session.dummyJoinUrl || makeDummyJoinUrl(session._id.toString()) };
 }
 
+// async function devFakePurchase({ sessionId, userId }) {
+//   if (process.env.LIVESESSIONS_DEV_FAKE_PURCHASE !== 'true') {
+//     const err = new Error('Fake purchase is disabled'); err.status = 400; throw err;
+//   }
+//   const session = await LiveSession.findById(sessionId).lean();
+//   if (!session) throw new Error('Live session not found');
+//   if (session.pricing?.type !== 'paid') { const err = new Error('Session is not paid'); err.status = 400; throw err; }
+//   if (!Order) throw new Error('Order model not found; wire your real checkout instead');
+
+//   const payload = {
+//     userId,
+//     amountMinor: session.pricing.amountMinor || 0,
+//     currency: session.pricing.currency || 'GBP',
+//     status: 'paid',
+//     items: [
+//       {
+//         productType: 'liveSession',
+//         productRef: session._id,
+//         title: session.title,
+//         unitAmountMinor: session.pricing.amountMinor || 0,
+//         quantity: 1,
+//       },
+//     ],
+//     meta: { source: 'dev_fake_purchase' },
+//   };
+//   const order = await Order.create(payload);
+//   return { ok: true, orderId: order._id };
+// }
+
 async function devFakePurchase({ sessionId, userId }) {
   if (process.env.LIVESESSIONS_DEV_FAKE_PURCHASE !== 'true') {
     const err = new Error('Fake purchase is disabled'); err.status = 400; throw err;
@@ -186,8 +193,21 @@ async function devFakePurchase({ sessionId, userId }) {
     meta: { source: 'dev_fake_purchase' },
   };
   const order = await Order.create(payload);
+
+  // grant access & send email (uses same path as webhook)
+  try {
+    await grantLiveSessionAfterPayment({
+      userId,
+      liveSessionId: session._id,
+      session: { id: `dev-${order._id}`, payment_intent: `dev-${order._id}` },
+    });
+  } catch (e) {
+    console.error('[DEV FAKE PURCHASE] grant/email failed:', e?.message || e);
+  }
+
   return { ok: true, orderId: order._id };
 }
+
 
 /* ---------------- Stripe checkout for PAID live sessions ---------------- */
 async function createLiveCheckout({ userId, liveSessionId }) {
@@ -223,21 +243,53 @@ async function createLiveCheckout({ userId, liveSessionId }) {
 }
 
 /* ---------------- Grant after payment (webhook or success sync) ---------------- */
+// async function grantLiveSessionAfterPayment({ userId, liveSessionId, session }) {
+//   if (!Types.ObjectId.isValid(userId) || !Types.ObjectId.isValid(liveSessionId)) return false;
+
+//   const exists = await LiveSession.findById(liveSessionId).select('_id').lean();
+//   if (!exists) return false;
+
+//   await LiveSessionAccess.updateOne(
+//     { userId, sessionId: liveSessionId },
+//     {
+//       $setOnInsert: { userId, sessionId: liveSessionId, source: 'purchase' },
+//       $set: { orderId: session?.payment_intent || session?.id },
+//     },
+//     { upsert: true }
+//   );
+//   return true;
+// }
+
 async function grantLiveSessionAfterPayment({ userId, liveSessionId, session }) {
-  if (!Types.ObjectId.isValid(userId) || !Types.ObjectId.isValid(liveSessionId)) return false;
+  if (!Types.ObjectId.isValid(userId) || !Types.ObjectId.isValid(liveSessionId)) {
+    return { ok: false, grantedNew: false };
+  }
 
-  const exists = await LiveSession.findById(liveSessionId).select('_id').lean();
-  if (!exists) return false;
+  const live = await LiveSession.findById(liveSessionId).lean();
+  if (!live) return { ok: false, grantedNew: false };
 
-  await LiveSessionAccess.updateOne(
+  // Upsert access; email only if this was a NEW grant
+  const res = await LiveSessionAccess.updateOne(
     { userId, sessionId: liveSessionId },
     {
-      $setOnInsert: { userId, sessionId: liveSessionId, source: 'purchase' },
+      $setOnInsert: { userId, sessionId: liveSessionId, source: 'purchase', createdAt: new Date() },
       $set: { orderId: session?.payment_intent || session?.id },
     },
     { upsert: true }
   );
-  return true;
+
+  const grantedNew = !!(res && (res.upsertedCount > 0 || res.upsertedId));
+  if (grantedNew) {
+    try {
+      const user = await User.findById(userId).select('name email').lean();
+      const joinUrl = live.dummyJoinUrl || makeDummyJoinUrl(String(liveSessionId));
+      await sendLiveEmail({ user, live, joinUrl });
+    } catch (e) {
+      console.error('[EMAIL] live ticket send failed:', e?.message || e);
+    }
+  }
+
+  return { ok: true, grantedNew };
 }
 
 /* ---------------- Exports (single block) ---------------- */

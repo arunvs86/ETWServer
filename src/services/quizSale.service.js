@@ -3,6 +3,8 @@ const { Types } = require('mongoose');
 const Quiz = require('../models/Quiz');
 const Order = require('../models/Order');
 const Membership = require('../models/Membership');
+const User = require('../models/User');                  // NEW
+const { sendQuizEmail } = require('./notifyPurchase');   // NEW
 
 const STRIPE_SK = process.env.STRIPE_SECRET_KEY;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
@@ -95,15 +97,55 @@ async function createQuizCheckoutBySlug({ userId, slug }) {
   return { checkoutUrl: session.url, sessionId: session.id };
 }
 
+// async function grantQuizAfterPayment({ userId, quizId, session }) {
+//   const quiz = await Quiz.findById(quizId);
+//   if (!quiz) return;
+
+//   const amountMinor = session.amount_total ?? session.amount_subtotal ?? (quiz.pricing?.amountMinor || 0);
+//   const currency = (session.currency || (quiz.pricing?.currency || 'GBP')).toUpperCase();
+
+//   const idempotencyKey = String(session.payment_intent || session.id);
+//   await Order.findOneAndUpdate(
+//     { idempotencyKey },
+//     {
+//       userId,
+//       items: [{
+//         kind: 'quiz',
+//         refId: quiz._id,
+//         titleSnapshot: quiz.title,
+//         amountMinor,
+//         currency,
+//         metadata: { slug: quiz.slug },
+//       }],
+//       totalAmountMinor: amountMinor,
+//       currency,
+//       status: 'paid',
+//       paymentProvider: 'stripe',
+//       stripe: {
+//         checkoutSessionId: session.id,
+//         paymentIntentId: session.payment_intent || undefined,
+//         customerId: session.customer || undefined,
+//       },
+//       idempotencyKey,
+//     },
+//     { upsert: true, new: true, setDefaultsOnInsert: true }
+//   );
+// }
+
 async function grantQuizAfterPayment({ userId, quizId, session }) {
   const quiz = await Quiz.findById(quizId);
-  if (!quiz) return;
+  if (!quiz) return { grantedNew: false };
 
   const amountMinor = session.amount_total ?? session.amount_subtotal ?? (quiz.pricing?.amountMinor || 0);
   const currency = (session.currency || (quiz.pricing?.currency || 'GBP')).toUpperCase();
 
   const idempotencyKey = String(session.payment_intent || session.id);
-  await Order.findOneAndUpdate(
+
+  // Check if an order with this key already exists (prevents duplicate emails)
+  const pre = await Order.findOne({ idempotencyKey }).select('_id').lean();
+
+  // Upsert the Order (idempotent persistence)
+  const order = await Order.findOneAndUpdate(
     { idempotencyKey },
     {
       userId,
@@ -128,7 +170,26 @@ async function grantQuizAfterPayment({ userId, quizId, session }) {
     },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
+
+  const grantedNew = !pre; // first time we see this payment
+
+  if (grantedNew) {
+    try {
+      const user = await User.findById(userId).select('name email').lean();
+      await sendQuizEmail({
+        user,
+        quiz: { _id: quiz._id, slug: quiz.slug, title: quiz.title },
+        amountMinor,
+        currency,
+      });
+    } catch (e) {
+      console.error('[EMAIL] quiz send failed:', e?.message || e);
+    }
+  }
+
+  return { grantedNew, order };
 }
+
 
 module.exports = {
   ensureStripeForQuiz,

@@ -5,6 +5,9 @@ const Resource = require('../models/Resource');
 const Membership = require('../models/Membership');
 const ResourceAccess = require('../models/ResourceAccess'); // from earlier reply
 const Order = require('../models/Order'); // you already have this in courses flow
+const User = require('../models/User');                    
+const { sendResourceEmail } = require('./notifyPurchase'); 
+
 
 const STRIPE_SK = process.env.STRIPE_SECRET_KEY;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
@@ -94,16 +97,57 @@ const cancelUrl  = `${FRONTEND_URL}/resources/${r.slug || r._id}?purchase=cancel
 }
 
 /** On webhook success, mark Order and grant ResourceAccess */
+// async function grantResourceAfterPayment({ userId, resourceId, session }) {
+//   const r = await Resource.findById(resourceId);
+//   if (!r) return;
+
+//   const amountMinor = session.amount_total ?? session.amount_subtotal ?? r.pricing.amountMinor;
+//   const currency = (session.currency || toStripeCurrency(r.pricing.currency)).toUpperCase();
+
+//   // settle Order
+//   const idempotencyKey = String(session.payment_intent || session.id);
+//   await Order.findOneAndUpdate(
+//     { idempotencyKey },
+//     {
+//       userId,
+//       items: [{
+//         kind: 'resource',
+//         refId: r._id,
+//         titleSnapshot: r.title,
+//         amountMinor,
+//         currency,
+//         metadata: { slug: r.slug },
+//       }],
+//       totalAmountMinor: amountMinor,
+//       currency,
+//       status: 'paid',
+//       paymentProvider: 'stripe',
+//       stripe: {
+//         checkoutSessionId: session.id,
+//         paymentIntentId: session.payment_intent || undefined,
+//         customerId: session.customer || undefined,
+//       },
+//       idempotencyKey,
+//     },
+//     { upsert: true, new: true, setDefaultsOnInsert: true }
+//   );
+
+/** On webhook success, mark Order and grant ResourceAccess, then email once */
 async function grantResourceAfterPayment({ userId, resourceId, session }) {
-  const r = await Resource.findById(resourceId);
-  if (!r) return;
+  const r = await Resource.findById(resourceId).lean();
+  if (!r) return { grantedNew: false };
 
-  const amountMinor = session.amount_total ?? session.amount_subtotal ?? r.pricing.amountMinor;
-  const currency = (session.currency || toStripeCurrency(r.pricing.currency)).toUpperCase();
+  const amountMinor = session.amount_total ?? session.amount_subtotal ?? (r.pricing?.amountMinor || 0);
+  const currency = (session.currency || (r.pricing?.currency || 'GBP')).toUpperCase();
 
-  // settle Order
+  // Use Stripe payment intent (or session id) as idempotency key
   const idempotencyKey = String(session.payment_intent || session.id);
-  await Order.findOneAndUpdate(
+
+  // If we've already processed this payment, don't re-email
+  const pre = await Order.findOne({ idempotencyKey }).select('_id').lean();
+
+  // 1) Upsert Order (idempotent)
+  const order = await Order.findOneAndUpdate(
     { idempotencyKey },
     {
       userId,
@@ -129,8 +173,8 @@ async function grantResourceAfterPayment({ userId, resourceId, session }) {
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
 
-  // grant access
-  await ResourceAccess.findOneAndUpdate(
+  // 2) Grant access (idempotent)
+  const resAccess = await ResourceAccess.updateOne(
     { userId, resourceId },
     {
       $setOnInsert: {
@@ -141,8 +185,28 @@ async function grantResourceAfterPayment({ userId, resourceId, session }) {
         expiresAt: null,
       },
     },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true }
   );
+
+  const accessNew = !!(resAccess && (resAccess.upsertedCount > 0 || resAccess.upsertedId));
+  const grantedNew = !pre || accessNew; // first time we saw this payment OR first-time access
+
+  // 3) Email once on first grant
+  if (!pre) {
+    try {
+      const user = await User.findById(userId).select('name email').lean();
+      await sendResourceEmail({
+        user,
+        resource: { _id: r._id, slug: r.slug, title: r.title },
+        amountMinor,
+        currency,
+      });
+    } catch (e) {
+      console.error('[EMAIL] resource send failed:', e?.message || e);
+    }
+  }
+
+  return { grantedNew, order };
 }
 
 module.exports = { ensureStripeForResource, createResourceCheckout, grantResourceAfterPayment };

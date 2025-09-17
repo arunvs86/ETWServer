@@ -38,10 +38,13 @@
     "express": "^5.1.0",
     "google-auth-library": "^10.2.1",
     "helmet": "^8.1.0",
+    "ics": "^3.8.1",
     "jsonwebtoken": "^9.0.2",
+    "luxon": "^3.7.2",
     "mongoose": "^8.17.1",
     "morgan": "^1.10.1",
     "multer": "^2.0.2",
+    "nodemailer": "^7.0.6",
     "stripe": "^18.4.0",
     "zod": "^4.0.17"
   },

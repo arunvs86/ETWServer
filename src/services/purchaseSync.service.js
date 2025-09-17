@@ -10,13 +10,7 @@ const resourcePurchase = require('./resourcePurchase.service');
 
 function httpError(status, msg) { const e = new Error(msg); e.status = status; return e; }
 
-/**
- * Generic sync for any one-time Checkout:
- * - membership: sess.metadata.planId === 'yearly' | 'lifetime'
- * - course:     sess.metadata.type === 'course'        (+ courseId, userId)
- * - live:       sess.metadata.type === 'live-session'  (+ liveSessionId, userId)
- * - resource:   sess.metadata.type === 'resource'      (+ resourceId, userId)
- */
+
 async function syncFromCheckoutSession({ sessionId }) {
   if (!stripe) throw httpError(500, 'Stripe not configured');
 
