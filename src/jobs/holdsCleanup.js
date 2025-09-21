@@ -1,7 +1,7 @@
 // jobs/holdsCleanup.js
 const TutoringSession = require('../models/TutoringSession');
 
-function startHoldsCleanup({ intervalMs = 5 * 60 * 1000 } = {}) {
+function startHoldsCleanup({ intervalMs = 5  * 1000 } = {}) {
   async function tick() {
     try {
       const now = new Date();

@@ -393,17 +393,68 @@ async function handleStripeWebhook({ rawBody, signature }) {
       }
 
       if (sess.metadata?.type === 'tutoring') {
+        console.log('[WEBHOOK][tutoring] sess.id=%s meta=%o', sess.id, sess.metadata);
+        const { grantTutoringAfterPayment } = require('./tutoringPurchase.service');
         try {
-          await grantTutoringAfterPayment({ session: sess });
+          const out = await grantTutoringAfterPayment({ session: sess });
+          console.log('[WEBHOOK][tutoring] granted:', out);
         } catch (e) {
-          console.error('[WEBHOOK] tutoring grant failed:', e?.message || e);
-          // Optional: rethrow so Stripe retries the webhook
-          // throw e;
+          console.error('[WEBHOOK][tutoring] grant failed:', e?.message || e);
+          throw e; // keep rethrow for Stripe retry
+        }
+      }
+
+      if (sess.metadata?.type === 'ebook' && Types.ObjectId.isValid(userId)) {
+        const ebookId = sess.metadata.ebookId;
+        if (Types.ObjectId.isValid(ebookId)) {
+          try {
+            const ebookPurchase = require('../services/ebookPurchase.service');
+            await ebookPurchase.grantEbookAfterPayment({ userId, ebookId, session: sess });
+          } catch (e) { console.error('[WEBHOOK] grant ebook failed:', e?.message || e); }
         }
       }
       
       break;
     }
+
+    case 'checkout.session.expired': {
+      const obj = event.data.object; // Checkout Session
+      try {
+        const TutoringSession = require('../models/TutoringSession');
+        const idFromMeta = obj.metadata?.tutoringSessionId;
+        let booking = null;
+
+        if (idFromMeta) booking = await TutoringSession.findById(idFromMeta);
+        if (!booking) booking = await TutoringSession.findOne({ stripeCheckoutSessionId: obj.id });
+
+        if (booking && ['payment_pending','hold'].includes(booking.status)) {
+          booking.status = 'cancelled';
+          await booking.save();
+        }
+      } catch (e) {
+        console.error('[WEBHOOK] tutoring expire cleanup failed:', e?.message || e);
+        // no rethrow (expiry cleanup is best-effort)
+      }
+      break;
+    }
+
+    case 'payment_intent.payment_failed': {
+      const pi = event.data.object; // PaymentIntent
+      // Try to locate by the PaymentIntent -> Checkout Session is not guaranteed in this event,
+      // so we do best-effort lookup by stored stripePaymentIntentId (if already saved)
+      try {
+        const TutoringSession = require('../models/TutoringSession');
+        const booking = await TutoringSession.findOne({ stripePaymentIntentId: pi.id });
+        if (booking && ['payment_pending','hold'].includes(booking.status)) {
+          booking.status = 'cancelled';
+          await booking.save();
+        }
+      } catch (e) {
+        console.error('[WEBHOOK] tutoring failure cleanup failed:', e?.message || e);
+      }
+      break;
+    }
+    
     default:
       console.log('[WEBHOOK] ignored event:', event.type);
   }

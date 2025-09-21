@@ -18,6 +18,32 @@ function nocache(_req, res, next) {
   res.set('Surrogate-Control', 'no-store');
   next();
 }
+
+function sanitizeZoomInput(input = {}) {
+  const out = {};
+  const url = (input.joinUrl || '').trim();
+  const pass = (input.passcode || '').trim();
+  const startUrl = (input.startUrl || '').trim();
+
+  const isHttps = (u) => /^https:\/\//i.test(u);
+  const allowedHost = (u) => {
+    try {
+      const h = new URL(u).host.toLowerCase();
+      return (
+        h === 'zoom.us' ||
+        h.endsWith('.zoom.us') ||        // *.zoom.us incl. vanity subdomains
+        h === 'app.zoom.us'
+      );
+    } catch { return false; }
+  };
+
+  if (url && isHttps(url) && allowedHost(url)) out.joinUrl = url;
+  if (startUrl && isHttps(startUrl) && allowedHost(startUrl)) out.startUrl = startUrl;
+  if (pass) out.passcode = pass.slice(0, 64); // reasonable cap
+  return Object.keys(out).length ? out : undefined;
+}
+
+
 function getUserId(req) {
   const v = req.user && (req.user._id || req.user.id);
   return v ? String(v) : null;
@@ -77,6 +103,8 @@ router.post('/', authGuard, requireRole('instructor', 'admin'), async (req, res)
       return res.status(400).json({ error: 'Invalid price' });
     }
 
+    const zoom = sanitizeZoomInput(req.body?.zoom || {});
+    console.log("zoom link", zoom)
     const doc = await LiveSession.create({
       hostUserId: uid,
       title: String(title).trim(),
@@ -95,6 +123,7 @@ router.post('/', authGuard, requireRole('instructor', 'admin'), async (req, res)
       },
       membersAccess,
       dummyJoinUrl: undefined,
+      ...(zoom ? { zoom } : {}),
     });
 
     if (!doc.dummyJoinUrl) { doc.dummyJoinUrl = makeDummyJoinUrl(doc._id.toString()); await doc.save(); }
@@ -182,7 +211,66 @@ async function joinHandler(req, res) {
   const url = s?.zoom?.joinUrl || s?.zoom?.startUrl || s?.dummyJoinUrl || 'https://example.com/dummy-live';
   return res.json({ ok: true, url });
 }
+
+// add below other helpers
+
+
+
 router.get('/:id/join', nocache, joinHandler);
 router.post('/:id/join', nocache, joinHandler);
+
+// UPDATE (instructor/admin; host ownership enforced)
+router.patch('/:id', authGuard, requireRole('instructor', 'admin'), async (req, res) => {
+  try {
+    const uid = getUserId(req);
+    const s = await LiveSession.findById(req.params.id);
+    if (!s) return res.status(404).json({ error: 'Not found' });
+
+    // Only owner instructor or admin can edit
+    const isOwner = String(s.hostUserId) === String(uid);
+    const isAdmin = req.user?.role === 'admin';
+    if (!isOwner && !isAdmin) return res.status(403).json({ error: 'Forbidden' });
+
+    const updates = {};
+    if (typeof req.body.title === 'string') updates.title = req.body.title.trim();
+    if (typeof req.body.description === 'string') updates.description = req.body.description;
+    if (typeof req.body.thumbnail === 'string') updates.thumbnail = req.body.thumbnail || undefined;
+
+    if (req.body.startAt) updates.startAt = new Date(req.body.startAt);
+    if (req.body.endAt)   updates.endAt   = new Date(req.body.endAt);
+
+    if (req.body.timezone)   updates.timezone   = req.body.timezone;
+    if (req.body.visibility) updates.visibility = req.body.visibility;
+    if (typeof req.body.capacity === 'number') updates.capacity = req.body.capacity;
+
+    if (req.body.pricing) {
+      const p = req.body.pricing;
+      updates.pricing = {
+        type: p.type || s.pricing?.type || 'free',
+        amountMinor: Number(p.amountMinor || 0),
+        currency: p.currency || s.pricing?.currency || 'GBP',
+      };
+    }
+
+    if (req.body.membersAccess) updates.membersAccess = req.body.membersAccess;
+
+    // NEW: zoom input
+    if (req.body.zoom) {
+      const z = sanitizeZoomInput(req.body.zoom);
+      if (z) updates.zoom = z;
+      else updates.zoom = undefined; // allows clearing when invalid/empty
+    }
+
+    Object.assign(s, updates);
+    await s.validate();
+    await s.save();
+
+    return res.json(mapPublic(s.toObject()));
+  } catch (err) {
+    console.error('PATCH /live-sessions/:id error:', err?.message);
+    return res.status(400).json({ error: err.message || 'Update failed' });
+  }
+});
+
 
 module.exports = router;

@@ -1,19 +1,26 @@
-// services/tutoringPurchase.service.js
+// src/services/tutoringPurchase.service.js
 const TutoringSession = require('../models/TutoringSession');
+const TutorProfile = require('../models/TutorProfile');
+const User = require('../models/User');
+const { sendTutoringEmails } = require('./notifyPurchase');
 
 function httpError(status, msg) { const e = new Error(msg); e.status = status; return e; }
 
-// Replace with real Zoom/Meet later
-async function generateMeetingLink(booking) {
-  const base = process.env.FRONTEND_URL || 'http://localhost:5173';
-  return `${base}/meeting/${booking._id}`;
+function extractFirstUrl(str = '') {
+  const m = String(str || '').match(/\bhttps?:\/\/[^\s)]+/i);
+  return m ? m[0] : null;
 }
 
-/**
- * Finalize a tutoring booking after Stripe Checkout succeeds.
- * Safe to run multiple times (idempotent).
- */
+function buildMeetingLink({ sessionId, tutorProfile }) {
+  const fromNote = extractFirstUrl(tutorProfile?.meetingNote || '');
+  if (fromNote) return fromNote;
+  const base = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+  return `${base}/meeting/${sessionId}`;
+}
+
 async function grantTutoringAfterPayment({ session: stripeCheckout }) {
+  console.log('[grantTutoring] start for checkout.id=%s meta=%o', stripeCheckout.id, stripeCheckout.metadata);
+
   const checkoutId = stripeCheckout.id;
   const paymentIntentId = typeof stripeCheckout.payment_intent === 'string'
     ? stripeCheckout.payment_intent
@@ -22,39 +29,42 @@ async function grantTutoringAfterPayment({ session: stripeCheckout }) {
   const meta = stripeCheckout.metadata || {};
   const sessionId = meta.tutoringSessionId;
 
-  // Find the hold booking
   let booking = null;
   if (sessionId) booking = await TutoringSession.findById(sessionId);
-  if (!booking && checkoutId) {
-    booking = await TutoringSession.findOne({ stripeCheckoutSessionId: checkoutId });
-  }
+  if (!booking && checkoutId) booking = await TutoringSession.findOne({ stripeCheckoutSessionId: checkoutId });
   if (!booking) throw httpError(404, 'Tutoring booking not found');
 
-  // Optional sanity checks
-  if (meta.studentId && String(booking.studentId) !== String(meta.studentId)) {
-    throw httpError(400, 'Student mismatch');
-  }
-  if (meta.tutorId && String(booking.tutorId) !== String(meta.tutorId)) {
-    throw httpError(400, 'Tutor mismatch');
-  }
-
-  // Idempotency
   if (['confirmed','completed','refunded'].includes(booking.status)) {
     return { ok: true, already: true, bookingId: String(booking._id) };
   }
 
-  // Attach refs and confirm
   if (!booking.stripeCheckoutSessionId && checkoutId) {
     booking.stripeCheckoutSessionId = checkoutId;
   }
   if (paymentIntentId) booking.stripePaymentIntentId = paymentIntentId;
 
-  booking.status = 'confirmed';
-  booking.meetingLink = await generateMeetingLink(booking);
+  const tutorProfile = await TutorProfile.findOne({ userId: booking.tutorId }).lean();
+  const link = buildMeetingLink({ sessionId: String(booking._id), tutorProfile });
 
+  booking.status = 'confirmed';
+  booking.meetingLink = link;
   await booking.save();
 
-  // TODO: send emails to tutor & student with booking.meetingLink + ICS
+  try {
+    const [student, tutor] = await Promise.all([
+      User.findById(booking.studentId).select('name email').lean(),
+      User.findById(booking.tutorId).select('name email').lean(),
+    ]);
+    await sendTutoringEmails({
+      student, tutor,
+      session: booking.toObject ? booking.toObject() : booking,
+      meetingLink: link,
+      tutorProfile
+    });
+  } catch (err) {
+    console.error('[tutoring] email notify failed:', err.message);
+  }
+
   return { ok: true, bookingId: String(booking._id) };
 }
 

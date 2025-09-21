@@ -51,6 +51,99 @@ function wrapHtml(title, bodyHtml) {
   `;
 }
 
+function createTutoringIcsAttachment({ session, title = '1-to-1 Tutoring Session', description = '', location = '' }) {
+  try {
+    const dt = (d) => new Date(d).toISOString().replace(/[-:]/g,'').replace(/\.\d{3}Z$/,'Z');
+    const uid = `tutoring-${session._id}@yourapp`;
+    const ics = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//YourApp//Tutoring//EN',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+      'BEGIN:VEVENT',
+      `UID:${uid}`,
+      `DTSTAMP:${dt(new Date())}`,
+      `DTSTART:${dt(session.startAt)}`,
+      `DTEND:${dt(session.endAt)}`,
+      `SUMMARY:${title}`,
+      `DESCRIPTION:${(description || 'Tutoring session').replace(/\n/g, '\\n')}`,
+      location ? `LOCATION:${location}` : '',
+      'END:VEVENT',
+      'END:VCALENDAR'
+    ].filter(Boolean).join('\r\n');
+
+    return {
+      filename: 'tutoring.ics',
+      content: ics,
+      contentType: 'text/calendar; charset=utf-8',
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+async function sendTutoringEmails({ student, tutor, session, meetingLink, tutorProfile }) {
+  const toStudent = student?.email;
+  const toTutor   = tutor?.email;
+
+  const whenTz = tutorProfile?.timezone || 'Europe/London';
+  const whenLabel = fmtDate(session.startAt, whenTz);
+
+  const summaryStudent = `Tutoring with ${userDisplayName(tutor)}`;
+  const summaryTutor   = `Tutoring with ${userDisplayName(student)}`;
+  const description    = `Join link: ${meetingLink}`;
+
+  const icsStudent = createTutoringIcsAttachment({
+    session, title: summaryStudent, description, location: meetingLink
+  });
+  const icsTutor = createTutoringIcsAttachment({
+    session, title: summaryTutor, description, location: meetingLink
+  });
+
+  if (toStudent) {
+    const subject = 'Your tutoring session is confirmed';
+    const title = 'Tutoring confirmed ✅';
+    const body = `
+      <p>Hi ${userDisplayName(student)},</p>
+      <p>Your session is booked with <b>${userDisplayName(tutor)}</b>.</p>
+      <ul>
+        <li>When: <b>${whenLabel}</b> (${whenTz})</li>
+        <li>Join: <a href="${meetingLink}" target="_blank">${meetingLink}</a></li>
+        <li>Tutor email: <b>${tutor?.email || '—'}</b></li>
+        ${tutorProfile?.meetingNote ? `<li>Note from tutor: ${tutorProfile.meetingNote}</li>` : ''}
+      </ul>
+    `;
+    await sendEmail({
+      to: toStudent,
+      subject,
+      html: wrapHtml(title, body),
+      attachments: icsStudent ? [icsStudent] : undefined,
+    });
+  }
+
+  if (toTutor) {
+    const subject = 'A tutoring session has been booked';
+    const title = 'New session booked 📅';
+    const body = `
+      <p>Hi ${userDisplayName(tutor)},</p>
+      <p>You have a session booked by <b>${userDisplayName(student)}</b>.</p>
+      <ul>
+        <li>When: <b>${whenLabel}</b> (${whenTz})</li>
+        <li>Join: <a href="${meetingLink}" target="_blank">${meetingLink}</a></li>
+        <li>Student email: <b>${student?.email || '—'}</b></li>
+      </ul>
+      ${tutorProfile?.meetingNote ? `<p>Your meeting note on profile:</p><blockquote>${tutorProfile.meetingNote}</blockquote>` : ''}
+    `;
+    await sendEmail({
+      to: toTutor,
+      subject,
+      html: wrapHtml(title, body),
+      attachments: icsTutor ? [icsTutor] : undefined,
+    });
+  }
+}
+
 /** ---------------- Membership ---------------- */
 async function sendMembershipEmail({ user, planId, periodStart, periodEnd, amountMinor, currency = 'GBP' }) {
   const to = user?.email;
@@ -153,6 +246,7 @@ module.exports = {
   sendQuizEmail,
   sendResourceEmail,
   // helpers (exported in case you want them elsewhere)
+  sendTutoringEmails,
   formatMoney,
   fmtDate,
 };

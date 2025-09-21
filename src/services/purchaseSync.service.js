@@ -7,6 +7,7 @@ const membership = require('./membership.service');
 const courseSale = require('./courseSale.service');
 const livePurchase = require('./livePurchase.service');
 const resourcePurchase = require('./resourcePurchase.service');
+const tutoringPurchase = require('./tutoringPurchase.service');
 
 function httpError(status, msg) { const e = new Error(msg); e.status = status; return e; }
 
@@ -60,6 +61,10 @@ async function syncFromCheckoutSession({ sessionId }) {
       const quizSale = require('./quizSale.service');
       await quizSale.grantQuizAfterPayment({ userId, quizId, session: sess });
       return { kind: 'quiz', quizId, sessionId };
+    }
+    case 'tutoring': {
+      await tutoringPurchase.grantTutoringAfterPayment({ session: sess });
+      return { kind: 'tutoring', sessionId };
     }
     default:
       throw httpError(400, 'Unknown session type (no planId and no recognized type)');

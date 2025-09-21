@@ -282,7 +282,10 @@ async function grantLiveSessionAfterPayment({ userId, liveSessionId, session }) 
   if (grantedNew) {
     try {
       const user = await User.findById(userId).select('name email').lean();
-      const joinUrl = live.dummyJoinUrl || makeDummyJoinUrl(String(liveSessionId));
+      const joinUrl = (live.zoom && live.zoom.joinUrl) ||
+                      live.dummyJoinUrl ||
+                      makeDummyJoinUrl(String(liveSessionId));
+                      
       await sendLiveEmail({ user, live, joinUrl });
     } catch (e) {
       console.error('[EMAIL] live ticket send failed:', e?.message || e);

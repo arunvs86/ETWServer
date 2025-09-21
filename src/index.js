@@ -106,6 +106,7 @@ app.use('/resources',  require('./routes/resource.routes'));
 app.use(require('./routes/coursePurchase.routes'));
 const resourcePurchaseRoutes = require('./routes/resourcePurchase.routes');
 app.use('/', resourcePurchaseRoutes);  
+app.use('/api', require('./routes/payments.routes'));
 
 
 app.use(require('./routes/purchaseSync.routes'));  
@@ -126,6 +127,7 @@ app.use((err, req, res, next) => {
 const tutorsRouter = require('./routes/tutors.routes');
 app.use('/tutors', tutorsRouter);
 
+
 // -------- Tutoring: availability, sessions, checkout, manage (all under /) --------
 app.use('/', require('./routes/tutorAvailability.routes'));
 app.use('/', require('./routes/sessions.routes'));
@@ -135,6 +137,18 @@ app.use('/', require('./routes/tutorManage.routes'));
 // -------- Tutoring: "me" endpoints (profile & availability under /me) --------
 const meTutorRouter = require('./routes/meTutor.routes');
 app.use('/me', meTutorRouter);
+
+const ebooksRouter = require('./routes/ebook.routes');
+app.use('/ebooks', ebooksRouter);
+
+// Checkout / publish
+const ebookPurchaseRoutes = require('./routes/ebookPurchase.routes');
+app.use('/', ebookPurchaseRoutes);
+
+// Instructor ebooks CRUD
+const instructorEbooksRoutes = require('./routes/instructorEbooks.routes');
+app.use('/instructor/ebooks', instructorEbooksRoutes);
+
 
 // -------- Error handler --------
 app.use((err, req, res, next) => {

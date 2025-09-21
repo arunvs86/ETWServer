@@ -1,6 +1,7 @@
 // controllers/tutors.controller.js
 const TutorProfile = require('../models/TutorProfile');
 const User = require('../models/User');
+const { Types } = require('mongoose');           // <-- ensure this
 
 function httpError(status, msg) { const e = new Error(msg); e.status = status; return e; }
 const asyncH = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -76,17 +77,24 @@ exports.getPublicTutors = asyncH(async (req, res) => {
 /**
  * PUBLIC: Tutor detail (listed only)
  */
-exports.getTutorPublicDetail = asyncH(async (req, res) => {
-  const tutorId = req.params.tutorId;
+exports.getTutorPublicDetail = async (req, res, next) => {
+  try {
+    const tutorId = req.params.tutorId;
+    if (!Types.ObjectId.isValid(tutorId)) {      // <-- guard
+      return res.status(404).json({ message: 'Tutor not found' });
+    }
 
-  const profile = await TutorProfile.findOne({ userId: tutorId, isListed: true }).lean();
-  if (!profile) throw httpError(404, 'Tutor not found');
+    const profile = await TutorProfile.findOne({ userId: tutorId, isListed: true }).lean();
+    if (!profile) return res.status(404).json({ message: 'Tutor not found' });
 
-  const user = await User.findById(tutorId).select('name avatar role isActive').lean();
-  if (!user || user.role !== 'instructor' || !user.isActive) throw httpError(404, 'Tutor not found');
+    const user = await User.findById(tutorId).select('name avatar role isActive').lean();
+    if (!user || user.role !== 'instructor' || !user.isActive) {
+      return res.status(404).json({ message: 'Tutor not found' });
+    }
 
-  res.json({ profile, user: { _id: user._id, name: user.name, avatar: user.avatar } });
-});
+    res.json({ profile, user: { _id: user._id, name: user.name, avatar: user.avatar } });
+  } catch (err) { next(err); }
+};
 
 /**
  * SELF: Get my profile (create UI decides based on 404)

@@ -54,6 +54,12 @@ async function create({ hostUserId, payload }) {
     },
     membersAccess: payload.membersAccess || 'none',
     dummyJoinUrl: undefined,
+    // ↓ NEW: accept zoom from payload (assumes route sanitizes; harmless if undefined)
+    zoom: payload.zoom ? {
+      joinUrl: payload.zoom.joinUrl,
+      passcode: payload.zoom.passcode,
+      startUrl: payload.zoom.startUrl,
+    } : undefined,
   });
 
   await doc.validate();
@@ -64,6 +70,7 @@ async function create({ hostUserId, payload }) {
 
   return doc.toObject();
 }
+
 
 async function list({ status, from, to, visibility, hostUserId, limit = 50, page = 1 }) {
   const q = {};
