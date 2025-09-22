@@ -35,6 +35,9 @@ app.use(cors({
 }));
 app.use((req, res, next) => { if (req.method === 'OPTIONS') return res.sendStatus(204); next(); });
 
+// LIVE SESSIONS
+const liveSessionRoutes = require('./routes/liveSession.routes');
+app.use('/live-sessions', liveSessionRoutes);
 
 // --- STRIPE WEBHOOK (FIRST, raw) ---
 const stripeCtrl = require('./controllers/stripeWebhook.controller');
@@ -50,6 +53,8 @@ app.use(cookieParser());
 //   if (req.path.startsWith('/webhooks/stripe')) return next();
 //   return devAuth(req, res, next);
 // });
+
+
 
 const devAuth = require('./middlewares/devAuth');
 app.use((req, res, next) => {
@@ -90,9 +95,7 @@ app.use('/api', require('./routes/public.quiz.routes'));
 app.use('/api', require('./routes/public.quizPlay.routes'));
 app.use('/api', require('./routes/me.quizAttempts.routes'));
 
-// LIVE SESSIONS
-const liveSessionRoutes = require('./routes/liveSession.routes');
-app.use('/live-sessions', attachUserIfPresent, liveSessionRoutes);
+
 
 const meLiveSessions = require('./routes/me.liveSessions.routes');
 app.use(meLiveSessions);
