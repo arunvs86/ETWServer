@@ -205,25 +205,44 @@ app.use(morgan('dev'));
 
 /** ---------- CORS (credentials) ---------- */
 const FRONTEND = process.env.FRONTEND_URL || 'http://localhost:5173';
-const ALLOWED_ORIGINS = [
-  FRONTEND,
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  // add any additional deployed frontends here (https)
-].filter(Boolean);
+// const ALLOWED_ORIGINS = [
+//   FRONTEND,
+//   'http://localhost:5173',
+//   'http://127.0.0.1:5173',
+//   // add any additional deployed frontends here (https)
+// ].filter(Boolean);
 
-app.use(cors({
-  origin(origin, cb) {
-    // allow same-origin/no-origin (mobile apps/curl) and whitelisted origins
-    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-    return cb(new Error('Not allowed by CORS'));
-  },
-  credentials: true,
-  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization','X-Requested-With','Cache-Control','Pragma','Expires'],
-}));
-// Fast exit for preflight
-app.use((req, res, next) => { if (req.method === 'OPTIONS') return res.sendStatus(204); next(); });
+// app.use(cors({
+//   origin(origin, cb) {
+//     // allow same-origin/no-origin (mobile apps/curl) and whitelisted origins
+//     if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+//     return cb(new Error('Not allowed by CORS'));
+//   },
+//   credentials: true,
+//   methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+//   allowedHeaders: ['Content-Type','Authorization','X-Requested-With','Cache-Control','Pragma','Expires'],
+// }));
+// // Fast exit for preflight
+// app.use((req, res, next) => { if (req.method === 'OPTIONS') return res.sendStatus(204); next(); });
+
+// CORS (allowlist + proper preflight handling)
+const allowlist = [
+    FRONTEND,                         // e.g. http://localhost:5173 in dev
+    'https://etwclient.onrender.com', // your production client
+  ];
+  app.use(cors({
+    origin(origin, cb) {
+      // allow same-origin/non-browser (no Origin header), and known clients
+      if (!origin || allowlist.includes(origin)) return cb(null, true);
+      return cb(new Error('CORS: origin not allowed'));
+    },
+    credentials: true,
+    methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+    allowedHeaders: ['Content-Type','Authorization','X-Requested-With','Cache-Control','Pragma','Expires'],
+    optionsSuccessStatus: 204,
+  }));
+  // Let `cors` respond to preflight WITH headers
+  +app.options('*', cors());
 
 /** ---------- Stripe Webhook FIRST (raw body) ---------- */
 const stripeCtrl = require('./controllers/stripeWebhook.controller');
