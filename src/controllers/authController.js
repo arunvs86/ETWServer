@@ -300,11 +300,11 @@ function newJti() {
 function getRefreshCookieOpts() {
   return {
     httpOnly: true,
-    secure: true,        // REQUIRED in production (HTTPS)
-    sameSite: 'none',    // REQUIRED for cross-site after Stripe redirect / iOS
-    path: '/auth',       // cookie sent to /auth/* (refresh, logout, etc.)
-    // domain: '.yourdomain.com', // uncomment if FE/BE on subdomains
-    maxAge: 1000 * Number(process.env.JWT_REFRESH_TTL || 2592000), // seconds -> ms
+    secure: true,
+    sameSite: 'none', // cross-site after Stripe
+    path: '/',        // <-- make this '/' to match your setter
+    // domain: '.yourdomain.com', // optional when you move to one site
+    maxAge: 1000 * Number(process.env.JWT_REFRESH_TTL || 2592000),
   };
 }
 
@@ -420,6 +420,7 @@ exports.refresh = async (req, res, next) => {
   }
 };
 
+
 exports.logout = async (req, res, next) => {
   try {
     const token = req.cookies?.rt;
@@ -427,13 +428,9 @@ exports.logout = async (req, res, next) => {
       try {
         const decoded = verifyRefreshToken(token);
         await Session.findOneAndUpdate({ jti: decoded.jti }, { revokedAt: new Date() });
-      } catch (_) {
-        // ignore bad/expired refresh tokens on logout
-      }
+      } catch (_) {}
     }
-
-    // CLEAR cookie — options must match (path/samesite/secure/httpOnly)
-    res.clearCookie('rt', getRefreshCookieOpts());
+    res.clearCookie('rt', getRefreshCookieOpts()); // path '/' now
     return res.status(204).end();
   } catch (err) {
     return next(err);

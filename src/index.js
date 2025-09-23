@@ -196,6 +196,8 @@ const cors = require('cors');
 const path = require('path');
 const connectDB = require('./config/db');
 const discussionsRoutes = require('./routes/discussions.routes');
+const { verifyRefreshToken, signAccessToken } = require('./utils/token');
+const User = require('./models/User');
 
 const app = express();
 
@@ -216,16 +218,58 @@ app.use(morgan('dev'));
 // }));
 // app.use((req, res, next) => { if (req.method === 'OPTIONS') return res.sendStatus(204); next(); });
 
-app.use(cors({
-  origin: (origin, cb) => cb(null, true),
+// app.use(cors({
+//   origin: (origin, cb) => cb(null, true),
+//   credentials: true,
+//   methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+//   allowedHeaders: ['Content-Type','Authorization','X-Requested-With','Cache-Control','Pragma','Expires'],
+// }));
+// app.use((req, res, next) => { if (req.method === 'OPTIONS') return res.sendStatus(204); next(); });
+
+const allowlist = [
+  FRONTEND,
+  'https://etwclient.onrender.com',
+];
+
+const corsCfg = {
+  origin(origin, cb) {
+    if (!origin || allowlist.includes(origin)) return cb(null, true);
+    return cb(new Error('CORS: origin not allowed'));
+  },
   credentials: true,
   methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
   allowedHeaders: ['Content-Type','Authorization','X-Requested-With','Cache-Control','Pragma','Expires'],
-}));
-app.use((req, res, next) => { if (req.method === 'OPTIONS') return res.sendStatus(204); next(); });
+  optionsSuccessStatus: 204,
+};
+
+// ✅ This alone is enough; it will respond to OPTIONS preflights with headers
+app.use(cors(corsCfg));
+// Express v5 uses path-to-regexp v6 — do NOT use '*'
+// app.options('/(.*)', cors(corsCfg));
+
 app.use(express.json({ limit: '50mb' }));               // <= raise limit
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(cookieParser());
+
+
+app.get('/auth/refresh-redirect', async (req, res) => {
+  try {
+    const rt = req.cookies?.rt;
+    if (!rt) return res.redirect(302, `${FRONTEND}#/auth?refresh=missing`);
+
+    const decoded = verifyRefreshToken(rt); // throws if invalid/expired
+    const user = await User.findById(decoded.sub).select('_id role');
+    if (!user) return res.redirect(302, `${FRONTEND}#/auth?refresh=nouser`);
+
+    const accessToken = signAccessToken({ sub: user._id.toString(), role: user.role });
+
+    const back = new URL(req.query.redirect || FRONTEND);
+    back.hash = `accessToken=${encodeURIComponent(accessToken)}`; // fragment only
+    return res.redirect(302, back.toString());
+  } catch {
+    return res.redirect(302, `${FRONTEND}#/auth?refresh=fail`);
+  }
+});
 
 /** ---------- Stripe Webhook FIRST (raw body) ---------- */
 const stripeCtrl = require('./controllers/stripeWebhook.controller');
@@ -245,6 +289,8 @@ if (process.env.NODE_ENV !== 'production') {
 // LIVE SESSIONS
 const liveSessionRoutes = require('./routes/liveSession.routes');
 app.use('/live-sessions', liveSessionRoutes);
+
+
 
 console.log('[server] mounting /api me.quizAttempts.routes');
 app.use('/api', require('./routes/me.quizAttempts.routes'));
