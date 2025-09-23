@@ -8,6 +8,7 @@ const courseSale = require('./courseSale.service');
 const livePurchase = require('./livePurchase.service');
 const resourcePurchase = require('./resourcePurchase.service');
 const tutoringPurchase = require('./tutoringPurchase.service');
+const ebookPurchase = require('./ebookPurchase.service'); 
 
 function httpError(status, msg) { const e = new Error(msg); e.status = status; return e; }
 
@@ -66,7 +67,13 @@ async function syncFromCheckoutSession({ sessionId }) {
       await tutoringPurchase.grantTutoringAfterPayment({ session: sess });
       return { kind: 'tutoring', sessionId };
     }
+    case 'ebook': { // <— ADD THIS BLOCK
+      const ebookId = meta.ebookId;
+      await ebookPurchase.grantEbookAfterPayment({ userId, ebookId, session: sess });
+      return { kind: 'ebook', ebookId, sessionId };
+    }
     default:
+      console.error('[purchaseSync] Unknown type. metadata =', meta);
       throw httpError(400, 'Unknown session type (no planId and no recognized type)');
   }
 }
