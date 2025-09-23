@@ -252,24 +252,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(cookieParser());
 
 
-app.get('/auth/refresh-redirect', async (req, res) => {
-  try {
-    const rt = req.cookies?.rt;
-    if (!rt) return res.redirect(302, `${FRONTEND}#/auth?refresh=missing`);
 
-    const decoded = verifyRefreshToken(rt); // throws if invalid/expired
-    const user = await User.findById(decoded.sub).select('_id role');
-    if (!user) return res.redirect(302, `${FRONTEND}#/auth?refresh=nouser`);
-
-    const accessToken = signAccessToken({ sub: user._id.toString(), role: user.role });
-
-    const back = new URL(req.query.redirect || FRONTEND);
-    back.hash = `accessToken=${encodeURIComponent(accessToken)}`; // fragment only
-    return res.redirect(302, back.toString());
-  } catch {
-    return res.redirect(302, `${FRONTEND}#/auth?refresh=fail`);
-  }
-});
 
 /** ---------- Stripe Webhook FIRST (raw body) ---------- */
 const stripeCtrl = require('./controllers/stripeWebhook.controller');
