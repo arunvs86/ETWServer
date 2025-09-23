@@ -4,6 +4,8 @@ const { Types } = require('mongoose');
 const LiveSession = require('../models/LiveSession');
 const LiveSessionAccess = require('../models/LiveSessionAccess');
 const { authGuard, requireRole } = require('../middlewares/auth');
+const cloudinary = require('../lib/cloudinary');
+const { uploadBufferToCloudinary } = require('../services/cloudinaryUpload.service');
 
 const router = express.Router();
 
@@ -78,6 +80,63 @@ function mapPublic(s) {
 }
 
 /* CREATE (instructor/admin only) */
+// router.post('/', authGuard, requireRole('instructor', 'admin'), async (req, res) => {
+//   try {
+//     const uid = getUserId(req);
+//     if (!uid) return res.status(401).json({ error: 'Unauthorized (no user id)' });
+//     if (!Types.ObjectId.isValid(uid)) return res.status(400).json({ error: 'Invalid user id' });
+//     console.log("req.body", req.body)
+//     const {
+//       title, description = '', startAt, endAt, timezone = 'Europe/London',
+//       visibility = 'public', capacity = 0, pricing = { type: 'free' },
+//       membersAccess = 'none', thumbnail,
+//     } = req.body || {};
+
+//     if (!title || !String(title).trim()) return res.status(400).json({ error: 'Title is required' });
+//     if (!startAt || !endAt) return res.status(400).json({ error: 'Start and End are required' });
+
+//     const start = new Date(startAt);
+//     const end = new Date(endAt);
+//     const now = new Date();
+//     if (isNaN(+start) || isNaN(+end)) return res.status(400).json({ error: 'Invalid dates' });
+//     if (start <= now) return res.status(400).json({ error: 'Start must be in the future' });
+//     if (end <= start) return res.status(400).json({ error: 'End must be after Start' });
+//     if (pricing?.type === 'paid' && !(Number(pricing.amountMinor || 0) > 0)) {
+//       return res.status(400).json({ error: 'Invalid price' });
+//     }
+
+//     const zoom = sanitizeZoomInput(req.body?.zoom || {});
+//     console.log("zoom link", zoom)
+//     const doc = await LiveSession.create({
+//       hostUserId: uid,
+//       title: String(title).trim(),
+//       description,
+//       thumbnail: thumbnail || undefined,
+//       startAt: start,
+//       endAt: end,
+//       timezone,
+//       visibility,
+//       capacity,
+//       provider: 'zoom',
+//       pricing: {
+//         type: pricing?.type || 'free',
+//         amountMinor: pricing?.type === 'paid' ? Number(pricing.amountMinor || 0) : 0,
+//         currency: pricing?.currency || 'GBP',
+//       },
+//       membersAccess,
+//       dummyJoinUrl: undefined,
+//       ...(zoom ? { zoom } : {}),
+//     });
+
+//     if (!doc.dummyJoinUrl) { doc.dummyJoinUrl = makeDummyJoinUrl(doc._id.toString()); await doc.save(); }
+//     return res.status(201).json(mapPublic(doc.toObject()));
+//   } catch (err) {
+//     console.error('CREATE /live-sessions error:', err?.message, err?.errors || '');
+//     if (err?.name === 'ValidationError') return res.status(400).json({ error: 'Validation failed', details: err.errors });
+//     return res.status(500).json({ error: 'Failed to create live session' });
+//   }
+// });
+
 router.post('/', authGuard, requireRole('instructor', 'admin'), async (req, res) => {
   try {
     const uid = getUserId(req);
@@ -93,25 +152,35 @@ router.post('/', authGuard, requireRole('instructor', 'admin'), async (req, res)
     if (!title || !String(title).trim()) return res.status(400).json({ error: 'Title is required' });
     if (!startAt || !endAt) return res.status(400).json({ error: 'Start and End are required' });
 
-    const start = new Date(startAt);
-    const end = new Date(endAt);
-    const now = new Date();
-    if (isNaN(+start) || isNaN(+end)) return res.status(400).json({ error: 'Invalid dates' });
-    if (start <= now) return res.status(400).json({ error: 'Start must be in the future' });
-    if (end <= start) return res.status(400).json({ error: 'End must be after Start' });
-    if (pricing?.type === 'paid' && !(Number(pricing.amountMinor || 0) > 0)) {
-      return res.status(400).json({ error: 'Invalid price' });
-    }
+    // ⬇️ Upload to Cloudinary if thumbnail is a base64 data URI
+    let thumbnailUrl;
+if (thumbnail && thumbnail.startsWith('data:image/')) {
+  try {
+    // Strip "data:image/jpeg;base64," prefix
+    const base64Data = thumbnail.split(',')[1];
+    const buffer = Buffer.from(base64Data, 'base64');
 
-    const zoom = sanitizeZoomInput(req.body?.zoom || {});
-    console.log("zoom link", zoom)
+    const uploaded = await uploadBufferToCloudinary(buffer, {
+      folder: 'live-thumbnails',
+    });
+
+    console.log("Cloudinary upload ok:", uploaded.secure_url);
+    thumbnailUrl = uploaded.secure_url;
+  } catch (err) {
+    console.error("Cloudinary upload failed:", err);
+    return res.status(500).json({ error: 'Thumbnail upload failed' });
+  }
+} else if (thumbnail && /^https?:\/\//.test(thumbnail)) {
+  thumbnailUrl = thumbnail; // accept normal URL
+}
+
     const doc = await LiveSession.create({
       hostUserId: uid,
       title: String(title).trim(),
       description,
-      thumbnail: thumbnail || undefined,
-      startAt: start,
-      endAt: end,
+      thumbnail: thumbnailUrl,
+      startAt: new Date(startAt),
+      endAt: new Date(endAt),
       timezone,
       visibility,
       capacity,
@@ -123,13 +192,13 @@ router.post('/', authGuard, requireRole('instructor', 'admin'), async (req, res)
       },
       membersAccess,
       dummyJoinUrl: undefined,
-      ...(zoom ? { zoom } : {}),
+      ...(sanitizeZoomInput(req.body?.zoom) ? { zoom: sanitizeZoomInput(req.body?.zoom) } : {}),
     });
 
     if (!doc.dummyJoinUrl) { doc.dummyJoinUrl = makeDummyJoinUrl(doc._id.toString()); await doc.save(); }
     return res.status(201).json(mapPublic(doc.toObject()));
   } catch (err) {
-    console.error('CREATE /live-sessions error:', err?.message, err?.errors || '');
+    console.error('CREATE /live-sessions error:', err?.message);
     if (err?.name === 'ValidationError') return res.status(400).json({ error: 'Validation failed', details: err.errors });
     return res.status(500).json({ error: 'Failed to create live session' });
   }
