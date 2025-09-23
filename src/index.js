@@ -242,7 +242,7 @@ const allowlist = [
     optionsSuccessStatus: 204,
   }));
   // Let `cors` respond to preflight WITH headers
-  +app.options('*', cors());
+  app.options('*', cors());
 
 /** ---------- Stripe Webhook FIRST (raw body) ---------- */
 const stripeCtrl = require('./controllers/stripeWebhook.controller');
