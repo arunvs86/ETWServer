@@ -298,12 +298,15 @@ function newJti() {
 
 // IMPORTANT: cookie options must match when setting and clearing
 function getRefreshCookieOpts() {
+  const PROD = process.env.NODE_ENV === 'production';
+  const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN || undefined; // leave undefined unless you set it intentionally
+
   return {
     httpOnly: true,
-    secure: true,
-    sameSite: 'none', // cross-site after Stripe
-    path: '/',        // <-- make this '/' to match your setter
-    // domain: '.yourdomain.com', // optional when you move to one site
+    secure: PROD,                    // true on https prod, false on http localhost
+    sameSite: PROD ? 'none' : 'lax', // prod cross-site needs 'none'
+    path: '/auth',                   // ← revert to what worked before
+    ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}),
     maxAge: 1000 * Number(process.env.JWT_REFRESH_TTL || 2592000),
   };
 }
@@ -414,12 +417,29 @@ exports.refresh = async (req, res, next) => {
     // await Session.findByIdAndUpdate(session._id, { revokedAt: new Date() });
     // setRefreshCookie(res, newRefresh);
 
+
     return res.status(200).json({ accessToken });
   } catch (err) {
     return next(err);
   }
 };
 
+
+// exports.logout = async (req, res, next) => {
+//   try {
+//     const token = req.cookies?.rt;
+//     if (token) {
+//       try {
+//         const decoded = verifyRefreshToken(token);
+//         await Session.findOneAndUpdate({ jti: decoded.jti }, { revokedAt: new Date() });
+//       } catch (_) {}
+//     }
+//     res.clearCookie('rt', getRefreshCookieOpts()); // path '/' now
+//     return res.status(204).end();
+//   } catch (err) {
+//     return next(err);
+//   }
+// };
 
 exports.logout = async (req, res, next) => {
   try {
@@ -430,7 +450,7 @@ exports.logout = async (req, res, next) => {
         await Session.findOneAndUpdate({ jti: decoded.jti }, { revokedAt: new Date() });
       } catch (_) {}
     }
-    res.clearCookie('rt', getRefreshCookieOpts()); // path '/' now
+    res.clearCookie('rt', getRefreshCookieOpts()); // matches setter (path:'/auth', sameSite, secure, domain)
     return res.status(204).end();
   } catch (err) {
     return next(err);
