@@ -35,7 +35,9 @@ async function getOne(req, res, next) {
 async function entitlement(req, res, next) {
   try {
     const session = await svc.getById(req.params.id);
-    const userId = (req.user && (req.user.id || req.user._id)) || null;
+    // const userId = (req.user && (req.user.id || req.user._id)) || null;
+    const userId = getUserId(req); // uses req.user or 'x-user-id' (dev)
+    console.log("userId", userId)
     const out = await svc.entitlement({ session, userId });
     return res.json(out);
   } catch (err) { next(err); }

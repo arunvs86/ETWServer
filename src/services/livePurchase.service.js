@@ -99,6 +99,7 @@ async function getById(id) {
 }
 
 async function entitlement({ session, userId }) {
+  console.log("Userid", userId)
   if (!userId) return { canJoin: false, reason: 'auth_required' };
 
   if (session.pricing?.type === 'free') {

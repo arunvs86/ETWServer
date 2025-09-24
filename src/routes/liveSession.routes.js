@@ -47,9 +47,12 @@ function sanitizeZoomInput(input = {}) {
 
 
 function getUserId(req) {
-  const v = req.user && (req.user._id || req.user.id);
-  return v ? String(v) : null;
-}
+    const v = req.user && (req.user._id || req.user.id);
+    if (v) return String(v);
+    const shim = req.headers['x-user-id'];
+    return shim ? String(shim) : null;
+  }
+
 function isMemberActive(user) {
   const m = user?.membership;
   return !!m && (m.status === 'active' || m.status === 'trialing');
@@ -226,7 +229,7 @@ router.get('/:id', async (req, res) => {
 });
 
 /* ENTITLEMENT (optional-auth already attached at mount) */
-router.get('/:id/entitlement', nocache, async (req, res) => {
+router.get('/:id/entitlement', authGuard, nocache, async (req, res) => {
   const s = await LiveSession.findById(req.params.id).lean();
   if (!s) return res.status(404).json({ error: 'Not found' });
 
@@ -239,6 +242,7 @@ router.get('/:id/entitlement', nocache, async (req, res) => {
 
   // need user to check purchases/access
   const userId = getUserId(req);
+  console.log("Userid", userId)
   if (!userId) return res.json({ canJoin: false, reason: 'auth_required' });
 
   // check live access first (granted by webhook/confirm)
@@ -285,8 +289,8 @@ async function joinHandler(req, res) {
 
 
 
-router.get('/:id/join', nocache, joinHandler);
-router.post('/:id/join', nocache, joinHandler);
+router.get('/:id/join', authGuard,nocache, joinHandler);
+router.post('/:id/join', authGuard,nocache, joinHandler);
 
 // UPDATE (instructor/admin; host ownership enforced)
 router.patch('/:id', authGuard, requireRole('instructor', 'admin'), async (req, res) => {
