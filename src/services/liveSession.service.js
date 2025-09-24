@@ -1,189 +1,7 @@
-// const crypto = require('crypto');
-// const LiveSession = require('../models/LiveSession');
-// const LiveSessionAccess = require('../models/LiveSessionAccess');
-
-// let Membership = null;
-// let Order = null;
-// try { Membership = require('../models/Membership'); } catch (_) {}
-// try { Order = require('../models/Order'); } catch (_) {}
-
-// const JOIN_WINDOW_MINUTES = parseInt(process.env.LIVE_JOIN_WINDOW_MIN || process.env.LIVE_JOIN_WINDOW_MINUTES || '10', 10);
-// const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
-
-// function shortToken(len = 16) {
-//   return crypto.randomBytes(len).toString('base64url');
-// }
-// function makeDummyJoinUrl(sessionId) {
-//   const token = shortToken(12);
-//   return `${FRONTEND_URL}/live/${sessionId}/join?d=${token}`;
-// }
-
-// async function isUserMember(userId) {
-//   if (!Membership) return false;
-//   const m = await Membership.findOne({ userId, status: 'active' }).lean();
-//   return !!m;
-// }
-
-// async function hasPaidOrderForSession(userId, sessionId) {
-//   if (!Order) return false;
-//   const o = await Order.findOne({
-//     userId,
-//     'items.productType': 'liveSession',
-//     'items.productRef': sessionId,
-//     status: { $in: ['paid', 'succeeded', 'complete'] },
-//   }).lean();
-//   return !!o;
-// }
-
-// async function create({ hostUserId, payload }) {
-//   const doc = new LiveSession({
-//     hostUserId,
-//     courseId: payload.courseId || undefined,
-//     title: payload.title,
-//     description: payload.description || '',
-//     startAt: new Date(payload.startAt),
-//     endAt: new Date(payload.endAt),
-//     timezone: payload.timezone || 'Europe/London',
-//     visibility: payload.visibility || 'public',
-//     capacity: payload.capacity || 0,
-//     provider: 'zoom',
-//     pricing: {
-//       type: payload.pricing?.type || 'free',
-//       amountMinor: payload.pricing?.amountMinor || 0,
-//       currency: payload.pricing?.currency || 'GBP',
-//     },
-//     membersAccess: payload.membersAccess || 'none',
-//     dummyJoinUrl: undefined,
-//     // ↓ NEW: accept zoom from payload (assumes route sanitizes; harmless if undefined)
-//     zoom: payload.zoom ? {
-//       joinUrl: payload.zoom.joinUrl,
-//       passcode: payload.zoom.passcode,
-//       startUrl: payload.zoom.startUrl,
-//     } : undefined,
-//   });
-
-//   await doc.validate();
-//   await doc.save();
-
-//   doc.dummyJoinUrl = makeDummyJoinUrl(doc._id.toString());
-//   await doc.save();
-
-//   return doc.toObject();
-// }
-
-
-// async function list({ status, from, to, visibility, hostUserId, limit = 50, page = 1 }) {
-//   const q = {};
-//   if (status) q.status = status;
-//   if (visibility) q.visibility = visibility;
-//   if (hostUserId) q.hostUserId = hostUserId;
-//   if (from || to) {
-//     q.startAt = {};
-//     if (from) q.startAt.$gte = new Date(from);
-//     if (to) q.startAt.$lte = new Date(to);
-//   }
-
-//   const safeLimit = Math.min(limit, 200);
-//   const skip = (Math.max(1, page) - 1) * safeLimit;
-//   const results = await LiveSession.find(q).sort({ startAt: 1 }).skip(skip).limit(safeLimit).lean();
-//   const total = await LiveSession.countDocuments(q);
-//   return { total, results, page, pageSize: safeLimit };
-// }
-
-// async function getById(id) {
-//   const doc = await LiveSession.findById(id).lean();
-//   if (!doc) throw new Error('Live session not found');
-//   return doc;
-// }
-
-// async function entitlement({ session, userId }) {
-//   if (!userId) return { canJoin: false, reason: 'auth_required' };
-
-//   if (session.pricing?.type === 'free') {
-//     return { canJoin: true, source: 'free' };
-//   }
-
-//   const member = await isUserMember(userId);
-//   if (member && session.membersAccess === 'free') {
-//     return { canJoin: true, source: 'membership' };
-//   }
-
-//   // PRIMARY: access doc from webhook/confirm
-//   const access = await LiveSessionAccess.findOne({ userId, sessionId: session._id }).lean();
-//   if (access) return { canJoin: true, source: access.source || 'purchase' };
-
-//   // Optional fallback: legacy orders
-//   const paid = await hasPaidOrderForSession(userId, session._id);
-//   if (paid) return { canJoin: true, source: 'purchase' };
-
-//   if (member && session.membersAccess === 'paid') {
-//     return { canJoin: false, reason: 'purchase_required_even_for_members' };
-//   }
-//   return { canJoin: false, reason: 'purchase_required' };
-// }
-
-// async function join({ sessionId, userId }) {
-//   const session = await LiveSession.findById(sessionId);
-//   if (!session) throw new Error('Live session not found');
-//   if (session.status === 'canceled') throw new Error('Session canceled');
-
-//   if (!session.isJoinableNow(new Date(), JOIN_WINDOW_MINUTES)) {
-//     return { ok: false, reason: 'outside_join_window', joinWindowMinutes: JOIN_WINDOW_MINUTES };
-//   }
-
-//   const ent = await entitlement({ session: session.toObject(), userId });
-//   if (!ent.canJoin) return { ok: false, reason: ent.reason };
-
-//   return { ok: true, url: session.dummyJoinUrl || makeDummyJoinUrl(session._id.toString()) };
-// }
-
-// async function devFakePurchase({ sessionId, userId }) {
-//   if (process.env.LIVESESSIONS_DEV_FAKE_PURCHASE !== 'true') {
-//     const err = new Error('Fake purchase is disabled');
-//     err.status = 400;
-//     throw err;
-//   }
-//   const session = await LiveSession.findById(sessionId).lean();
-//   if (!session) throw new Error('Live session not found');
-//   if (session.pricing?.type !== 'paid') {
-//     const err = new Error('Session is not paid');
-//     err.status = 400;
-//     throw err;
-//   }
-//   if (!Order) throw new Error('Order model not found; wire your real checkout instead');
-
-//   const payload = {
-//     userId,
-//     amountMinor: session.pricing.amountMinor || 0,
-//     currency: session.pricing.currency || 'GBP',
-//     status: 'paid',
-//     items: [
-//       {
-//         productType: 'liveSession',
-//         productRef: session._id,
-//         title: session.title,
-//         unitAmountMinor: session.pricing.amountMinor || 0,
-//         quantity: 1,
-//       },
-//     ],
-//     meta: { source: 'dev_fake_purchase' },
-//   };
-//   const order = await Order.create(payload);
-//   return { ok: true, orderId: order._id };
-// }
-
-// module.exports = {
-//   create,
-//   list,
-//   getById,
-//   entitlement,
-//   join,
-//   devFakePurchase,
-// };
-
 const crypto = require('crypto');
 const LiveSession = require('../models/LiveSession');
 const LiveSessionAccess = require('../models/LiveSessionAccess');
+const { Types } = require('mongoose');
 
 let Membership = null;
 let Order = null;
@@ -233,16 +51,32 @@ async function isUserMember(userId) {
   return !!m;
 }
 
+// async function hasPaidOrderForSession(userId, sessionId) {
+//   if (!Order) return false;
+//   const o = await Order.findOne({
+//     userId,
+//     'items.productType': 'liveSession',
+//     'items.productRef': sessionId,
+//     status: { $in: ['paid', 'succeeded', 'complete'] },
+//   }).lean();
+//   return !!o;
+// }
+
 async function hasPaidOrderForSession(userId, sessionId) {
-  if (!Order) return false;
-  const o = await Order.findOne({
-    userId,
-    'items.productType': 'liveSession',
-    'items.productRef': sessionId,
-    status: { $in: ['paid', 'succeeded', 'complete'] },
-  }).lean();
-  return !!o;
-}
+    if (!Order) return false;
+    const ref = Types.ObjectId.isValid(sessionId) ? new Types.ObjectId(sessionId) : sessionId;
+    const o = await Order.findOne({
+      userId,
+      status: { $in: ['paid', 'succeeded', 'complete'] },
+      items: {
+        $elemMatch: {
+          kind: 'live-session',
+        refId: ref,
+        },
+      },
+    }).lean();
+    return !!o;
+  }
 
 async function create({ hostUserId, payload }) {
   // 1) If thumbnail is a data URL, upload to Cloudinary and replace with URL
@@ -326,10 +160,21 @@ async function getById(id) {
 }
 
 async function entitlement({ session, userId }) {
-  if (!userId) return { canJoin: false, reason: 'auth_required' };
+  // if (!userId) return { canJoin: false, reason: 'auth_required' };
+    if (!userId) return { hasAccess: false, canJoin: false, reason: 'auth_required' };
 
+  // if (session.pricing?.type === 'free') {
+  //   return { canJoin: true, source: 'free' };
+  // }
+  let hasAccess = false;
+  let via = null;
+
+  // Free session ⇒ everyone has access
   if (session.pricing?.type === 'free') {
-    return { canJoin: true, source: 'free' };
+    hasAccess = true; via = 'free';
+    // return { hasAccess, canJoin: hasAccess, source: via };
+    hasAccess = true; via = 'membership';
+    return { hasAccess, canJoin: hasAccess, source: via };
   }
 
   const member = await isUserMember(userId);
@@ -338,15 +183,27 @@ async function entitlement({ session, userId }) {
   }
 
   const access = await LiveSessionAccess.findOne({ userId, sessionId: session._id }).lean();
-  if (access) return { canJoin: true, source: access.source || 'purchase' };
+  // if (access) return { canJoin: true, source: access.source || 'purchase' };
+  if (access) {
+        hasAccess = true; via = access.source || 'purchase';
+        return { hasAccess, canJoin: hasAccess, source: via };
+      }
 
   const paid = await hasPaidOrderForSession(userId, session._id);
-  if (paid) return { canJoin: true, source: 'purchase' };
+  // if (paid) return { canJoin: true, source: 'purchase' };
+    if (paid) {
+        hasAccess = true; via = 'purchase';
+        return { hasAccess, canJoin: hasAccess, source: via };
+      }
 
   if (member && session.membersAccess === 'paid') {
-    return { canJoin: false, reason: 'purchase_required_even_for_members' };
+    // return { canJoin: false, reason: 'purchase_required_even_for_members' };
+       return { hasAccess: false, canJoin: false, reason: 'purchase_required_even_for_members' };
+
   }
-  return { canJoin: false, reason: 'purchase_required' };
+  // return { canJoin: false, reason: 'purchase_required' };
+    return { hasAccess: false, canJoin: false, reason: 'purchase_required' };
+
 }
 
 async function join({ sessionId, userId }) {
@@ -379,23 +236,48 @@ async function devFakePurchase({ sessionId, userId }) {
   }
   if (!Order) throw new Error('Order model not found; wire your real checkout instead');
 
-  const payload = {
-    userId,
-    amountMinor: session.pricing.amountMinor || 0,
-    currency: session.pricing.currency || 'GBP',
-    status: 'paid',
-    items: [
-      {
-        productType: 'liveSession',
-        productRef: session._id,
-        title: session.title,
-        unitAmountMinor: session.pricing.amountMinor || 0,
-        quantity: 1,
-      },
-    ],
-    meta: { source: 'dev_fake_purchase' },
-  };
-  const order = await Order.create(payload);
+  // const payload = {
+  //   userId,
+  //   amountMinor: session.pricing.amountMinor || 0,
+  //   currency: session.pricing.currency || 'GBP',
+  //   status: 'paid',
+  //   items: [
+  //     {
+  //       productType: 'liveSession',
+  //       productRef: session._id,
+  //       title: session.title,
+  //       unitAmountMinor: session.pricing.amountMinor || 0,
+  //       quantity: 1,
+  //     },
+  //   ],
+  //   meta: { source: 'dev_fake_purchase' },
+  // };
+  const amountMinor = session.pricing?.amountMinor || 0;
+  const currency = (session.pricing?.currency || 'GBP').toUpperCase();
+  const idempotencyKey = `dev_live_${String(session._id)}_${String(userId)}`;
+
+  const order = await Order.findOneAndUpdate(
+    { idempotencyKey },
+    {
+      userId,
+      items: [{
+        kind: 'live-session',
+        refId: session._id,
+        titleSnapshot: session.title,
+        amountMinor,
+        currency,
+        metadata: { slug: session.slug },
+      }],
+      totalAmountMinor: amountMinor,
+      currency,
+      status: 'paid',
+      paymentProvider: 'dev',
+      notes: 'dev_fake_purchase',
+      idempotencyKey,
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+
   return { ok: true, orderId: order._id };
 }
 
