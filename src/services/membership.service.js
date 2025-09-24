@@ -7,6 +7,7 @@ const resourcePurchase = require('./resourcePurchase.service');
 const User = require('../models/User');                       // NEW
 const { sendMembershipEmail } = require('./notifyPurchase');  // NEW
 const { grantTutoringAfterPayment } = require('../services/tutoringPurchase.service');
+const { recordStripeOrder } = require('./orderRecorder.service');
 
 const STRIPE_SK = process.env.STRIPE_SECRET_KEY;
 const STRIPE_WH = process.env.STRIPE_WEBHOOK_SECRET;
@@ -143,6 +144,25 @@ async function upsertLifetimeFromCheckout({ userId, session }) {
     }
   }
 
+  try {
+    const amountMinor = session.amount_total ?? session.amount_subtotal ?? 0;
+    const currency = (session.currency || 'GBP').toUpperCase();
+    await recordStripeOrder({
+      userId,
+      session,
+      items: [{
+        kind: 'membership',
+        refId: doc._id,                    // Membership doc id
+        titleSnapshot: 'Lifetime Membership',
+        amountMinor,
+        currency,
+        metadata: { planId: 'lifetime' },
+      }],
+    });
+  } catch (e) {
+    console.error('[ORDER] lifetime membership order upsert failed:', e?.message || e);
+  }
+
   return { doc, createdOrExtended };
 }
 
@@ -208,6 +228,25 @@ async function upsertYearlyFromCheckout({ userId, session }) {
     } catch (e) {
       console.error('[EMAIL] membership(yearly) send failed:', e?.message || e);
     }
+  }
+
+  try {
+    const amountMinor = session.amount_total ?? session.amount_subtotal ?? 0;
+    const currency = (session.currency || 'GBP').toUpperCase();
+    await recordStripeOrder({
+      userId,
+      session,
+      items: [{
+        kind: 'membership',
+        refId: doc._id,                    // Membership doc id
+        titleSnapshot: 'Yearly Membership',
+        amountMinor,
+        currency,
+        metadata: { planId: 'yearly' },
+      }],
+    });
+  } catch (e) {
+    console.error('[ORDER] yearly membership order upsert failed:', e?.message || e);
   }
 
   return { doc, createdOrExtended };

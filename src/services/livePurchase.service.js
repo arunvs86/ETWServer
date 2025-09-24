@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const { Types } = require('mongoose');
 const User = require('../models/User');                  
 const { sendLiveEmail } = require('./notifyPurchase');   
+const { recordStripeOrder } = require('./orderRecorder.service');
 
 
 const LiveSession = require('../models/LiveSession');
@@ -290,6 +291,29 @@ async function grantLiveSessionAfterPayment({ userId, liveSessionId, session }) 
     } catch (e) {
       console.error('[EMAIL] live ticket send failed:', e?.message || e);
     }
+  }
+
+  try {
+    const amountMinor =
+      session?.amount_total ??
+      session?.amount_subtotal ??
+      (live?.pricing?.amountMinor || 0);
+    const currency = (session?.currency || live?.pricing?.currency || 'GBP').toUpperCase();
+  
+    await recordStripeOrder({
+      userId,
+      session,
+      items: [{
+        kind: 'live-session',
+        refId: live._id,
+        titleSnapshot: live.title || 'Live Session',
+        amountMinor,
+        currency,
+        metadata: { slug: live.slug },
+      }],
+    });
+  } catch (e) {
+    console.error('[ORDER] live-session order upsert failed:', e?.message || e);
   }
 
   return { ok: true, grantedNew };

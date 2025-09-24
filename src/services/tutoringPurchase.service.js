@@ -3,6 +3,7 @@ const TutoringSession = require('../models/TutoringSession');
 const TutorProfile = require('../models/TutorProfile');
 const User = require('../models/User');
 const { sendTutoringEmails } = require('./notifyPurchase');
+const { recordStripeOrder } = require('./orderRecorder.service');
 
 function httpError(status, msg) { const e = new Error(msg); e.status = status; return e; }
 
@@ -63,6 +64,32 @@ async function grantTutoringAfterPayment({ session: stripeCheckout }) {
     });
   } catch (err) {
     console.error('[tutoring] email notify failed:', err.message);
+  }
+
+  try {
+    const amountMinor =
+      stripeCheckout?.amount_total ??
+      stripeCheckout?.amount_subtotal ??
+      booking?.priceMinor ?? 0;
+    const currency = (stripeCheckout?.currency || booking?.currency || 'GBP').toUpperCase();
+  
+    await recordStripeOrder({
+      userId: String(booking.studentId),
+      session: stripeCheckout,
+      items: [{
+        kind: 'tutoring',
+        refId: booking._id,
+        titleSnapshot: booking.title || '1:1 Tutoring Session',
+        amountMinor,
+        currency,
+        metadata: {
+          tutorId: String(booking.tutorId),
+          durationMin: booking.durationMin,
+        },
+      }],
+    });
+  } catch (e) {
+    console.error('[ORDER] tutoring order upsert failed:', e?.message || e);
   }
 
   return { ok: true, bookingId: String(booking._id) };
