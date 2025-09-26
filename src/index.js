@@ -309,6 +309,10 @@ app.use('/instructor/mock', require('./routes/instructor.quiz.routes'));
 app.use('/instructor/mock', require('./routes/instructor.quizquestions.routes'));
 app.use('/learn', require('./routes/learn.routes'));
 
+// app.js (or wherever you mount routers)
+app.use('/me/purchases', require('./routes/me.purchases.routes'));
+
+
 app.use('/api', require('./routes/public.quiz.routes'));
 app.use('/api', require('./routes/public.quizPlay.routes'));
 app.use('/api', require('./routes/me.quizAttempts.routes'));
