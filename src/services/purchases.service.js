@@ -37,7 +37,7 @@ function buildDeepLink(kind, refId, slug) {
     case 'ebook':        return slug ? `/ebooks/${slug}` : `/ebooks`;
     case 'resource':     return slug ? `/resources/${slug}` : `/resources`;
     case 'quiz':         return slug ? `/quizzes/${slug}` : `/quizzes`;
-    case 'live-session': return `/live-sessions/${refId}`;
+    case 'live-session': return `/live/${refId}`;
     case 'course':       return slug ? `/course/${slug}` : `/courses`;
     default:             return '/';
   }
