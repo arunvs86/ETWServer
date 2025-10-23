@@ -229,6 +229,7 @@ app.use(morgan('dev'));
 const allowlist = [
   FRONTEND,
   'https://etwclient.onrender.com',
+  'https://educatetheworld.co.uk'
 ];
 
 const corsCfg = {
