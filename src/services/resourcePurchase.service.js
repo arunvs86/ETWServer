@@ -96,42 +96,6 @@ const cancelUrl  = `${FRONTEND_URL}/resources/${r.slug || r._id}?purchase=cancel
   return { checkoutUrl: session.url, sessionId: session.id };
 }
 
-/** On webhook success, mark Order and grant ResourceAccess */
-// async function grantResourceAfterPayment({ userId, resourceId, session }) {
-//   const r = await Resource.findById(resourceId);
-//   if (!r) return;
-
-//   const amountMinor = session.amount_total ?? session.amount_subtotal ?? r.pricing.amountMinor;
-//   const currency = (session.currency || toStripeCurrency(r.pricing.currency)).toUpperCase();
-
-//   // settle Order
-//   const idempotencyKey = String(session.payment_intent || session.id);
-//   await Order.findOneAndUpdate(
-//     { idempotencyKey },
-//     {
-//       userId,
-//       items: [{
-//         kind: 'resource',
-//         refId: r._id,
-//         titleSnapshot: r.title,
-//         amountMinor,
-//         currency,
-//         metadata: { slug: r.slug },
-//       }],
-//       totalAmountMinor: amountMinor,
-//       currency,
-//       status: 'paid',
-//       paymentProvider: 'stripe',
-//       stripe: {
-//         checkoutSessionId: session.id,
-//         paymentIntentId: session.payment_intent || undefined,
-//         customerId: session.customer || undefined,
-//       },
-//       idempotencyKey,
-//     },
-//     { upsert: true, new: true, setDefaultsOnInsert: true }
-//   );
-
 /** On webhook success, mark Order and grant ResourceAccess, then email once */
 async function grantResourceAfterPayment({ userId, resourceId, session }) {
   const r = await Resource.findById(resourceId).lean();
