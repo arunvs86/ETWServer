@@ -6,7 +6,7 @@ const LiveSessionAccess = require('../models/LiveSessionAccess');
 const { authGuard, requireRole } = require('../middlewares/auth');
 const cloudinary = require('../lib/cloudinary');
 const { uploadBufferToCloudinary } = require('../services/cloudinaryUpload.service');
-
+const Membership = require('../models/Membership');
 const router = express.Router();
 
 const FRONTEND_URL = process.env.FRONTEND_URL || process.env.APP_BASE_URL || 'http://localhost:5173';
@@ -53,10 +53,19 @@ function getUserId(req) {
     return shim ? String(shim) : null;
   }
 
-function isMemberActive(user) {
-  const m = user?.membership;
-  return !!m && (m.status === 'active' || m.status === 'trialing');
+// function isMemberActive(user) {
+//   const m = user?.membership;
+//   console.log("m",m)
+//   return !!m && (m.status === 'active' || m.status === 'trialing');
+// }
+
+function isMemberActive(mem) {
+  if (!mem) return false;
+  const now = new Date();
+  return (mem.status === 'active' || mem.status === 'trialing') &&
+         now >= mem.currentPeriodStart && now < mem.currentPeriodEnd;
 }
+
 function shortToken(len = 12) { return crypto.randomBytes(len).toString('base64url'); }
 function makeDummyJoinUrl(sessionId) { return `${FRONTEND_URL}/live/${sessionId}/join?d=${shortToken()}`; }
 function mapPublic(s) {
@@ -81,6 +90,64 @@ function mapPublic(s) {
     updatedAt: s.updatedAt,
   };
 }
+
+async function computeEntitlementForUser({ uid, memDoc, sessionDoc }) {
+  // 1. is this user an active member?
+  const memberActive = memDoc ? isMemberActive(memDoc) : false;
+
+  // 2. did this user already buy access / get granted access?
+  let individuallyOwned = false;
+  let individualSource;
+  if (uid) {
+    const access = await LiveSessionAccess.findOne({
+      userId: uid,
+      sessionId: sessionDoc._id,
+    }).lean();
+    if (access) {
+      individuallyOwned = true;
+      individualSource = access.source || 'purchase';
+    }
+  }
+
+  // 3. final access decision
+  // rule:
+  //  - if already purchased -> access
+  //  - else if session.membersAccess === 'free' AND memberActive -> access
+  //  - else -> no access
+  let hasAccess = false;
+  let source;
+
+  if (individuallyOwned) {
+    hasAccess = true;
+    source = individualSource || 'purchase';
+  } else if (sessionDoc.membersAccess === 'free' && memberActive) {
+    hasAccess = true;
+    source = 'membership';
+  } else {
+    hasAccess = false;
+    source = undefined;
+  }
+
+  // (optional: if you ever truly have totally free sessions)
+  if (sessionDoc.pricing?.type === 'free') {
+    hasAccess = true;
+    source = 'free';
+  }
+
+  // 4. can they join right now (time gate)?
+  let canJoinNow = false;
+  if (hasAccess) {
+    const now = Date.now();
+    const start = new Date(sessionDoc.startAt).getTime();
+    const end = new Date(sessionDoc.endAt).getTime();
+    const openFrom = start - JOIN_WINDOW_MIN * 60 * 1000;
+    const closeAt = end + 5 * 60 * 1000;
+    canJoinNow = now >= openFrom && now <= closeAt;
+  }
+
+  return { hasAccess, source, canJoinNow };
+}
+
 
 /* CREATE (instructor/admin only) */
 // router.post('/', authGuard, requireRole('instructor', 'admin'), async (req, res) => {
@@ -229,61 +296,135 @@ router.get('/:id', async (req, res) => {
 });
 
 /* ENTITLEMENT (optional-auth already attached at mount) */
+// router.get('/:id/entitlement', authGuard, nocache, async (req, res) => {
+//   const s = await LiveSession.findById(req.params.id).lean();
+//   if (!s) return res.status(404).json({ error: 'Not found' });
+
+//   // free to all
+//   if (s.pricing?.type === 'free') return res.json({ canJoin: true, source: 'free' });
+//   // free to members
+//   if (s.membersAccess === 'free' && isMemberActive(req.user)) {
+//     return res.json({ canJoin: true, source: 'membership' });
+//   }
+
+//   const user = req.user;
+//    if (!user.id) return false;
+  
+//     // Membership unlocks if flagged and user is active
+//     const mem = await Membership.findOne( user.id ).lean();
+//     if (isMemberActive(mem) && resource?.pricing?.includedInMembership) return true;
+  
+
+//   // need user to check purchases/access
+//   const userId = getUserId(req);
+//   console.log("Userid", userId)
+//   if (!userId) return res.json({ canJoin: false, reason: 'auth_required' });
+
+//   // check live access first (granted by webhook/confirm)
+//   const access = await LiveSessionAccess.findOne({ userId, sessionId: s._id }).lean();
+//   if (access) return res.json({ canJoin: true, source: access.source || 'purchase' });
+
+//   // no grant
+//   return res.json({ canJoin: false, reason: 'purchase_required' });
+// });
+
 router.get('/:id/entitlement', authGuard, nocache, async (req, res) => {
   const s = await LiveSession.findById(req.params.id).lean();
   if (!s) return res.status(404).json({ error: 'Not found' });
 
-  // free to all
-  if (s.pricing?.type === 'free') return res.json({ canJoin: true, source: 'free' });
-  // free to members
-  if (s.membersAccess === 'free' && isMemberActive(req.user)) {
-    return res.json({ canJoin: true, source: 'membership' });
+  const uid = getUserId(req); // string user id or null
+
+  // load membership doc for this user (or null if none)
+  let memDoc = null;
+  if (uid && Types.ObjectId.isValid(uid)) {
+    memDoc = await Membership.findOne({ userId: uid }).lean().catch(() => null);
   }
 
-  // need user to check purchases/access
-  const userId = getUserId(req);
-  console.log("Userid", userId)
-  if (!userId) return res.json({ canJoin: false, reason: 'auth_required' });
+  const { hasAccess, source, canJoinNow } = await computeEntitlementForUser({
+    uid,
+    memDoc,
+    sessionDoc: s,
+  });
 
-  // check live access first (granted by webhook/confirm)
-  const access = await LiveSessionAccess.findOne({ userId, sessionId: s._id }).lean();
-  if (access) return res.json({ canJoin: true, source: access.source || 'purchase' });
-
-  // no grant
-  return res.json({ canJoin: false, reason: 'purchase_required' });
+  return res.json({
+    hasAccess,   // boolean
+    canJoinNow,  // boolean
+    source,      // 'purchase' | 'membership' | 'free' | undefined
+  });
 });
 
+
 /* JOIN (GET and POST behave the same) */
+// async function joinHandler(req, res) {
+//   const s = await LiveSession.findById(req.params.id).lean();
+//   if (!s) return res.status(404).json({ ok: false, reason: 'not_found' });
+//   if (s.status === 'canceled') return res.status(400).json({ ok: false, reason: 'canceled' });
+
+//   // entitlement
+//   let allowed = false;
+//   if (s.pricing?.type === 'free') allowed = true;
+//   const mem = 
+//   else if (s.membersAccess === 'free' && isMemberActive(req.user)) allowed = true;
+//   else {
+//     const userId = getUserId(req);
+//     if (userId) {
+//       const access = await LiveSessionAccess.findOne({ userId, sessionId: s._id }).lean();
+//       allowed = !!access;
+//     }
+//   }
+//   if (!allowed) return res.status(403).json({ ok: false, reason: 'not_entitled' });
+
+//   // join window
+//   const now = new Date();
+//   const start = new Date(s.startAt);
+//   const end = new Date(s.endAt);
+//   const openFrom = new Date(start.getTime() - JOIN_WINDOW_MIN * 60 * 1000);
+//   const joinOpen = now >= openFrom && now <= new Date(end.getTime() + 5 * 60 * 1000);
+//   if (!joinOpen) return res.status(409).json({ ok: false, reason: 'join_window_closed' });
+
+//   // dummy or provider url
+//   const url = s?.zoom?.joinUrl || s?.zoom?.startUrl || s?.dummyJoinUrl || 'https://example.com/dummy-live';
+//   return res.json({ ok: true, url });
+// }
+
 async function joinHandler(req, res) {
   const s = await LiveSession.findById(req.params.id).lean();
   if (!s) return res.status(404).json({ ok: false, reason: 'not_found' });
-  if (s.status === 'canceled') return res.status(400).json({ ok: false, reason: 'canceled' });
-
-  // entitlement
-  let allowed = false;
-  if (s.pricing?.type === 'free') allowed = true;
-  else if (s.membersAccess === 'free' && isMemberActive(req.user)) allowed = true;
-  else {
-    const userId = getUserId(req);
-    if (userId) {
-      const access = await LiveSessionAccess.findOne({ userId, sessionId: s._id }).lean();
-      allowed = !!access;
-    }
+  if (s.status === 'canceled') {
+    return res.status(400).json({ ok: false, reason: 'canceled' });
   }
-  if (!allowed) return res.status(403).json({ ok: false, reason: 'not_entitled' });
 
-  // join window
-  const now = new Date();
-  const start = new Date(s.startAt);
-  const end = new Date(s.endAt);
-  const openFrom = new Date(start.getTime() - JOIN_WINDOW_MIN * 60 * 1000);
-  const joinOpen = now >= openFrom && now <= new Date(end.getTime() + 5 * 60 * 1000);
-  if (!joinOpen) return res.status(409).json({ ok: false, reason: 'join_window_closed' });
+  const uid = getUserId(req);
 
-  // dummy or provider url
-  const url = s?.zoom?.joinUrl || s?.zoom?.startUrl || s?.dummyJoinUrl || 'https://example.com/dummy-live';
+  let memDoc = null;
+  if (uid && Types.ObjectId.isValid(uid)) {
+    memDoc = await Membership.findOne({ userId: uid }).lean().catch(() => null);
+  }
+
+  const { hasAccess, canJoinNow } = await computeEntitlementForUser({
+    uid,
+    memDoc,
+    sessionDoc: s,
+  });
+
+  if (!hasAccess) {
+    return res.status(403).json({ ok: false, reason: 'not_entitled' });
+  }
+
+  if (!canJoinNow) {
+    return res.status(409).json({ ok: false, reason: 'join_window_closed' });
+  }
+
+  const url =
+    s?.zoom?.joinUrl ||
+    s?.zoom?.startUrl ||
+    s?.dummyJoinUrl ||
+    'https://example.com/dummy-live';
+
   return res.json({ ok: true, url });
 }
+
+
 
 // add below other helpers
 
