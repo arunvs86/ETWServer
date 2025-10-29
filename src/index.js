@@ -135,6 +135,9 @@ app.use('/', publicQuizRoutes);
 const tutorsRouter = require('./routes/tutors.routes');
 app.use('/tutors', tutorsRouter);
 
+app.use('/tutor-requests', require('./routes/tutorRequest.routes'));
+
+
 // availability, sessions, checkout, manage (under /)
 app.use('/', require('./routes/tutorAvailability.routes'));
 app.use('/', require('./routes/sessions.routes'));

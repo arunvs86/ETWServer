@@ -1,37 +1,3 @@
-// const express = require('express');
-// const router = express.Router();
-
-// const ctrl = require('../controllers/tutors.controller');
-// const meTutor = require('../controllers/meTutor.controller');
-// const sessions = require('../controllers/sessions.controller');
-// const { zodValidator, createProfileSchema, updateProfileSchema } = require('../validators/tutorProfile.validators');
-// const { authGuard, requireRole } = require('../middlewares/auth');
-
-// // ---------- Public ----------
-// router.get('/', ctrl.getPublicTutors);
-
-// // MUST be before '/:tutorId'
-// router.get('/:tutorId/availability', sessions.getTutorAvailabilityPublic);
-// router.post('/:tutorId/checkout', authGuard, sessions.createTutoringCheckout);
-
-// // ---------- Me (instructor) ----------
-// router.get('/me/tutor-profile', authGuard, requireRole('instructor'), ctrl.getMyTutorProfile);
-// router.post('/me/tutor-profile', authGuard, requireRole('instructor'), zodValidator(createProfileSchema), ctrl.createMyTutorProfile);
-// router.patch('/me/tutor-profile', authGuard, requireRole('instructor'), zodValidator(updateProfileSchema), ctrl.updateMyTutorProfile);
-// router.delete('/me/tutor-profile', authGuard, requireRole('instructor'), ctrl.deleteMyTutorProfile);
-
-// // Availability CRUD for tutor owner
-// router.get('/me/tutor/availability', authGuard, requireRole('instructor'), meTutor.getAvailability);
-// router.put('/me/tutor/availability', authGuard, requireRole('instructor'), meTutor.upsertAvailability);
-
-// // ---------- Admin ----------
-// router.patch('/admin/:tutorId/listing', authGuard, requireRole('admin'), ctrl.adminSetTutorListing);
-
-// // Keep this LAST
-// router.get('/:tutorId', ctrl.getTutorPublicDetail);
-
-// module.exports = router;
-
 // routes/tutors.routes.js
 const express = require('express');
 const router = express.Router();
