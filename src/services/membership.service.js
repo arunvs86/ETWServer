@@ -32,7 +32,7 @@ async function listPlans() {
   return {
     plans: [
       { id: 'yearly', title: '1 Year', interval: '12-months', priceId: YEARLY_PRICE_ID, priceMinor: 7500, currency: 'GBP', badge: '12 months access' },
-      { id: 'lifetime', title: 'Lifetime', interval: 'one-time', priceId: LIFETIME_PRICE_ID, priceMinor: 10000, currency: 'GBP', badge: 'Pay once, own forever' }
+      { id: 'lifetime', title: 'Lifetime', interval: 'one-time', priceId: LIFETIME_PRICE_ID, priceMinor: 5000, currency: 'GBP', badge: 'Pay once, own forever' }
     ]
   };
 }
