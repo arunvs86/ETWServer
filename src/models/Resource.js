@@ -25,6 +25,10 @@ const ResourceSchema = new Schema(
       includedInMembership: { type: Boolean, default: true }, // members get access if true
     },
 
+    // reels
+    isReel: { type: Boolean, default: false },
+    reelUrl: { type: String, default: '' },
+
     // lifecycle
     status: { type: String, enum: ['draft','published','archived'], default: 'draft', index: true },
     publishedAt: { type: Date },

@@ -12,6 +12,8 @@ function normalizeBasics(payload = {}) {
   if (payload.description != null) out.description = String(payload.description);
   if (payload.category != null) out.category = String(payload.category);
   if (payload.thumbnail != null) out.thumbnail = String(payload.thumbnail);
+  if (payload.isReel != null) out.isReel = !!payload.isReel;
+  if (payload.reelUrl != null) out.reelUrl = String(payload.reelUrl).trim();
   return out;
 }
 function toMinor(amountMajor) {
@@ -87,6 +89,8 @@ exports.updateBasics = async ({ instructorId, resourceId, payload }) => {
     category: doc.category,
     thumbnail: doc.thumbnail,
     pricing: doc.pricing,
+    isReel: doc.isReel,
+    reelUrl: doc.reelUrl,
     status: doc.status,
     publishedAt: doc.publishedAt,
     updatedAt: doc.updatedAt,
@@ -135,8 +139,10 @@ exports.publish = async ({ instructorId, resourceId }) => {
   if (!doc.title) throw httpError(400, 'Title required');
   if (!doc.slug) throw httpError(400, 'Slug required');
 
-  const itemCount = await ResourceItem.countDocuments({ resourceId: doc._id });
-  if (itemCount < 1) throw httpError(400, 'Add at least one item before publishing');
+  if (!doc.isReel) {
+    const itemCount = await ResourceItem.countDocuments({ resourceId: doc._id });
+    if (itemCount < 1) throw httpError(400, 'Add at least one item before publishing');
+  }
 
   // Ensure pricing exists
   if (!doc.pricing || doc.pricing.currency == null) {
@@ -244,6 +250,8 @@ exports.getOne = async ({ instructorId, resourceId }) => {
       category: doc.category,
       thumbnail: doc.thumbnail,
       pricing: doc.pricing,
+      isReel: doc.isReel,
+      reelUrl: doc.reelUrl,
       status: doc.status,
       publishedAt: doc.publishedAt,
       updatedAt: doc.updatedAt,

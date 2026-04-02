@@ -31,14 +31,17 @@ async function listResources(req, res, next) {
     const q = (req.query.q || '').trim();
     const category = (req.query.category || '').trim();
     const sortKey = String(req.query.sort || 'newest');
+    const isReelFilter = req.query.isReel;
 
     const query = { status: 'published' };
     if (q) {
-      // If you’ve set a text index, you can use $text. Regex works universally:
+      // If you've set a text index, you can use $text. Regex works universally:
       const rx = new RegExp(escapeRegExp(q), 'i');
       query.$or = [{ title: rx }, { description: rx }, { category: rx }];
     }
     if (category) query.category = category;
+    if (isReelFilter === 'true') query.isReel = true;
+    else query.isReel = { $ne: true };
 
     const sort = (() => {
       switch (sortKey) {
@@ -48,7 +51,7 @@ async function listResources(req, res, next) {
     })();
 
     const projection =
-      'title slug description category thumbnail pricing publishedAt updatedAt';
+      'title slug description category thumbnail pricing isReel reelUrl publishedAt updatedAt';
 
     const [items, total] = await Promise.all([
       Resource.find(query).select(projection).sort(sort).skip(skip).limit(limit).lean(),
