@@ -99,25 +99,36 @@ async function getPublicResourceBySlug({ slug, userId }) {
   if (!resDoc) return null;
 
   const priceMinor = resDoc.pricing?.amountMinor ?? 0;
-  const isFree = priceMinor === 0;
+  const includedInMembership = !!resDoc.pricing?.includedInMembership;
 
-  let unlocked = isFree;
+  // Truly free = price 0 AND not restricted to members
+  let unlocked = priceMinor === 0 && !includedInMembership;
 
-  if (!unlocked && userId && Types.ObjectId.isValid(userId)) {
-    // membership check
-    try {
-      if (resDoc.pricing?.includedInMembership) {
+  if (!unlocked && userId && Types.ObjectId.isValid(String(userId))) {
+    // membership check — covers both free-for-members and paid-for-members
+    if (includedInMembership) {
+      try {
         const mem = await Membership.findOne({ userId }).lean();
         if (isMemberActive(mem)) unlocked = true;
-      }
-    } catch (e) { console.error('[RESOURCE] membership check failed', e); }
+      } catch (e) { console.error('[RESOURCE] membership check failed', e); }
+    }
 
-    // purchase check
-    try {
-      const acc = await ResourceAccess.findOne({ userId, resourceId: resDoc._id, status: 'active' }).lean();
-      if (acc) unlocked = true;
-    } catch (e) { console.error('[RESOURCE] access check failed', e); }
+    // purchase check — explicit grant or purchase
+    if (!unlocked) {
+      try {
+        const acc = await ResourceAccess.findOne({ userId, resourceId: resDoc._id, status: 'active' }).lean();
+        if (acc) unlocked = true;
+      } catch (e) { console.error('[RESOURCE] access check failed', e); }
+    }
   }
+
+  console.log('[RESOURCE ACCESS]', {
+    slug,
+    userId,
+    priceMinor,
+    includedInMembership,
+    unlocked,
+  });
 
   const items = unlocked
     ? await ResourceItem.find({ resourceId: resDoc._id }).select('_id title type order link file').sort({ order: 1 }).lean()
