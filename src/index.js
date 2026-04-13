@@ -91,6 +91,10 @@ app.use('/courses', require('./routes/course.routes'));
 app.use('/instructor', require('./routes/instructor.course.routes'));
 app.use('/instructor', require('./routes/instructor.structure.routes'));
 
+// Resources must be registered before membership.routes (which has global authGuard at /)
+app.use('/instructor', require('./routes/instructor.resource.routes'));
+app.use('/resources',  require('./routes/resource.routes'));
+
 app.use('/', require('./routes/membership.routes'));
 app.use('/', require('./routes/enrollment.routes'));
 app.use('/', require('./routes/me.courses.routes'));
@@ -118,9 +122,6 @@ const meLiveSessions = require('./routes/me.liveSessions.routes');
 app.use(meLiveSessions);
 
 app.use('/discussions', discussionsRoutes);
-
-app.use('/instructor', require('./routes/instructor.resource.routes'));
-app.use('/resources',  require('./routes/resource.routes'));
 
 app.use(require('./routes/coursePurchase.routes'));
 const resourcePurchaseRoutes = require('./routes/resourcePurchase.routes');
