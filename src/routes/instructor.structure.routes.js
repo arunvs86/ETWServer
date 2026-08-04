@@ -5,7 +5,7 @@ const ctrl = require('../controllers/instructorStructure.controller');
 
 // NOTE: add real auth middleware when ready
  const { authGuard, requireRole } = require('../middlewares/auth');
- router.use(authGuard, requireRole('instructor'));
+ router.use(authGuard, requireRole('instructor', 'admin'));
 
 router.get('/courses/:id/curriculum', ctrl.getCurriculum);
 
