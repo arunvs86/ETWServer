@@ -22,10 +22,14 @@ function toMinor(amountMajor) {
   if (Number.isNaN(n)) return undefined;
   return Math.max(0, Math.round(n * 100));
 }
-async function ensureOwned(resourceId, instructorId) {
+const isAdmin = (role) => role === 'admin';
+
+async function ensureOwned(resourceId, instructorId, role) {
   if (!isObjId(resourceId)) throw httpError(400, 'Invalid resource id');
   const doc = await Resource.findById(resourceId);
   if (!doc) throw httpError(404, 'Resource not found');
+  // Admins may access any resource; everyone else is scoped to their own.
+  if (isAdmin(role)) return doc;
   if (!instructorId || String(doc.instructorId) !== String(instructorId)) {
     throw httpError(403, 'Not allowed');
   }
@@ -74,8 +78,8 @@ exports.createDraft = async ({ instructorId, payload }) => {
   }};
 };
 
-exports.updateBasics = async ({ instructorId, resourceId, payload }) => {
-  const doc = await ensureOwned(resourceId, instructorId);
+exports.updateBasics = async ({ instructorId, resourceId, payload, role }) => {
+  const doc = await ensureOwned(resourceId, instructorId, role);
   if (doc.status === 'archived') throw httpError(400, 'Cannot edit an archived resource');
 
   Object.assign(doc, normalizeBasics(payload));
@@ -97,8 +101,8 @@ exports.updateBasics = async ({ instructorId, resourceId, payload }) => {
   }};
 };
 
-exports.updatePricing = async ({ instructorId, resourceId, payload }) => {
-  const doc = await ensureOwned(resourceId, instructorId);
+exports.updatePricing = async ({ instructorId, resourceId, payload, role }) => {
+  const doc = await ensureOwned(resourceId, instructorId, role);
   if (doc.status === 'archived') throw httpError(400, 'Cannot edit an archived resource');
 
   let amountMinor;
@@ -128,8 +132,8 @@ exports.updatePricing = async ({ instructorId, resourceId, payload }) => {
   return { resource: { id: doc._id, pricing: doc.pricing, updatedAt: doc.updatedAt } };
 };
 
-exports.publish = async ({ instructorId, resourceId }) => {
-  const doc = await ensureOwned(resourceId, instructorId);
+exports.publish = async ({ instructorId, resourceId, role }) => {
+  const doc = await ensureOwned(resourceId, instructorId, role);
 
   if (doc.status === 'archived') {
     doc.status = 'draft';
@@ -161,8 +165,8 @@ exports.publish = async ({ instructorId, resourceId }) => {
   return { ok: true, resource: { id: doc._id, slug: doc.slug, status: doc.status, publishedAt: doc.publishedAt } };
 };
 
-exports.unpublish = async ({ instructorId, resourceId }) => {
-  const doc = await ensureOwned(resourceId, instructorId);
+exports.unpublish = async ({ instructorId, resourceId, role }) => {
+  const doc = await ensureOwned(resourceId, instructorId, role);
   if (doc.status === 'archived') throw httpError(400, 'Cannot unpublish an archived resource');
   doc.status = 'draft';
   doc.publishedAt = null;
@@ -170,8 +174,8 @@ exports.unpublish = async ({ instructorId, resourceId }) => {
   return { ok: true, resource: { id: doc._id, status: doc.status, publishedAt: doc.publishedAt } };
 };
 
-exports.archive = async ({ instructorId, resourceId }) => {
-  const doc = await ensureOwned(resourceId, instructorId);
+exports.archive = async ({ instructorId, resourceId, role }) => {
+  const doc = await ensureOwned(resourceId, instructorId, role);
   doc.status = 'archived';
   doc.archivedAt = new Date();
   doc.publishedAt = null;
@@ -179,16 +183,16 @@ exports.archive = async ({ instructorId, resourceId }) => {
   return { ok: true, resource: { id: doc._id, status: doc.status, archivedAt: doc.archivedAt } };
 };
 
-exports.restore = async ({ instructorId, resourceId }) => {
-  const doc = await ensureOwned(resourceId, instructorId);
+exports.restore = async ({ instructorId, resourceId, role }) => {
+  const doc = await ensureOwned(resourceId, instructorId, role);
   doc.status = 'draft';
   doc.archivedAt = null;
   await doc.save();
   return { ok: true, resource: { id: doc._id, status: doc.status } };
 };
 
-exports.destroy = async ({ instructorId, resourceId }) => {
-  const doc = await ensureOwned(resourceId, instructorId);
+exports.destroy = async ({ instructorId, resourceId, role }) => {
+  const doc = await ensureOwned(resourceId, instructorId, role);
   if (doc.status !== 'draft') throw httpError(400, 'Only draft resources can be deleted');
 
   await ResourceItem.deleteMany({ resourceId });
@@ -196,7 +200,7 @@ exports.destroy = async ({ instructorId, resourceId }) => {
   return { deleted: true };
 };
 
-exports.listMine = async ({ instructorId, status, q, page = 1, limit = 12 }) => {
+exports.listMine = async ({ instructorId, status, q, page = 1, limit = 12, role }) => {
   if (!instructorId) throw httpError(401, 'Auth required');
   if (!isObjId(instructorId)) throw httpError(400, 'Invalid instructor id');
 
@@ -204,7 +208,8 @@ exports.listMine = async ({ instructorId, status, q, page = 1, limit = 12 }) => 
   limit = Math.min(50, Math.max(1, Number(limit) || 12));
   const skip = (page - 1) * limit;
 
-  const query = { instructorId: new Types.ObjectId(instructorId) };
+  // Admins see every instructor's resources; others are scoped to their own.
+  const query = isAdmin(role) ? {} : { instructorId: new Types.ObjectId(instructorId) };
   if (status && ['draft','published','archived'].includes(String(status))) query.status = status;
 
   const hasQ = q && String(q).trim().length > 0;
@@ -237,8 +242,8 @@ exports.listMine = async ({ instructorId, status, q, page = 1, limit = 12 }) => 
   };
 };
 
-exports.getOne = async ({ instructorId, resourceId }) => {
-  const doc = await ensureOwned(resourceId, instructorId);
+exports.getOne = async ({ instructorId, resourceId, role }) => {
+  const doc = await ensureOwned(resourceId, instructorId, role);
   const items = await ResourceItem.find({ resourceId: doc._id }).sort({ order: 1, _id: 1 }).lean();
 
   return {
@@ -269,7 +274,7 @@ exports.getOne = async ({ instructorId, resourceId }) => {
 
 /* ---------- Items ---------- */
 exports.listItems = async ({ instructorId, resourceId }) => {
-  // await ensureOwned(resourceId, instructorId);
+  // await ensureOwned(resourceId, instructorId, role);
   const items = await ResourceItem.find({ resourceId }).sort({ order: 1, _id: 1 }).lean();
   return { items: items.map((it) => ({
     id: it._id,
@@ -281,8 +286,8 @@ exports.listItems = async ({ instructorId, resourceId }) => {
   })) };
 };
 
-exports.createItem = async ({ instructorId, resourceId, payload }) => {
-  await ensureOwned(resourceId, instructorId);
+exports.createItem = async ({ instructorId, resourceId, payload, role }) => {
+  await ensureOwned(resourceId, instructorId, role);
   const type = String(payload.type || '').trim();
   if (!['link','file'].includes(type)) throw httpError(400, 'type must be link|file');
   const title = String(payload.title || '').trim();
@@ -319,8 +324,8 @@ exports.createItem = async ({ instructorId, resourceId, payload }) => {
   }};
 };
 
-exports.updateItem = async ({ instructorId, resourceId, itemId, payload }) => {
-  await ensureOwned(resourceId, instructorId);
+exports.updateItem = async ({ instructorId, resourceId, itemId, payload, role }) => {
+  await ensureOwned(resourceId, instructorId, role);
   if (!isObjId(itemId)) throw httpError(400, 'Invalid item id');
 
   const it = await ResourceItem.findOne({ _id: itemId, resourceId });
@@ -356,15 +361,15 @@ exports.updateItem = async ({ instructorId, resourceId, itemId, payload }) => {
   }};
 };
 
-exports.deleteItem = async ({ instructorId, resourceId, itemId }) => {
-  await ensureOwned(resourceId, instructorId);
+exports.deleteItem = async ({ instructorId, resourceId, itemId, role }) => {
+  await ensureOwned(resourceId, instructorId, role);
   if (!isObjId(itemId)) throw httpError(400, 'Invalid item id');
   await ResourceItem.deleteOne({ _id: itemId, resourceId });
   return { deleted: true };
 };
 
-exports.reorderItems = async ({ instructorId, resourceId, order }) => {
-  await ensureOwned(resourceId, instructorId);
+exports.reorderItems = async ({ instructorId, resourceId, order, role }) => {
+  await ensureOwned(resourceId, instructorId, role);
   if (!Array.isArray(order) || !order.length) throw httpError(400, 'order must be an array of itemIds');
 
   const items = await ResourceItem.find({ resourceId, _id: { $in: order } }).select('_id').lean();
