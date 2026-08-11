@@ -40,7 +40,11 @@ const UserSchema = new Schema(
     lastLoginAt: { type: Date },
     passwordChangedAt: { type: Date },
     archivedAt: { type: Date },
-    isActive: { type: Boolean, default: true }
+    isActive: { type: Boolean, default: true },
+
+    // Password reset (forgot-password flow). Stored hashed; never returned to client.
+    resetPasswordTokenHash: { type: String, select: false },
+    resetPasswordExpires: { type: Date, select: false }
   },
   { timestamps: true }
 );

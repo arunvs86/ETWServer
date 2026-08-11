@@ -285,6 +285,10 @@ const crypto = require('crypto');
 const User = require('../models/User');
 const Session = require('../models/Session');
 const { hashPassword, verifyPassword } = require('../utils/password.js');
+const { sendEmail } = require('../services/email.service');
+
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+const RESET_TOKEN_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const { signAccessToken, signRefreshToken, verifyRefreshToken, hash } = require('../utils/token.js');
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -559,6 +563,142 @@ exports.me = async (req, res, next) => {
     return res.status(200).json({
       user: { id: user._id, name: user.name, email: user.email, role: user.role, avatar: user.avatar },
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/* ============================================================
+ * Password reset (forgot password)
+ * ========================================================== */
+
+// Lightweight in-memory throttle: one reset email per address per cooldown.
+const RESET_COOLDOWN_MS = 60 * 1000;
+const _resetLastSent = new Map(); // emailLc -> timestamp
+function _resetThrottled(emailLc) {
+  const now = Date.now();
+  const last = _resetLastSent.get(emailLc) || 0;
+  if (now - last < RESET_COOLDOWN_MS) return true;
+  _resetLastSent.set(emailLc, now);
+  // opportunistic cleanup so the map can't grow unbounded
+  if (_resetLastSent.size > 5000) {
+    for (const [k, t] of _resetLastSent) if (now - t > RESET_COOLDOWN_MS) _resetLastSent.delete(k);
+  }
+  return false;
+}
+
+function resetEmailHtml(name, link) {
+  const safeName = name ? String(name).replace(/[<>]/g, '') : 'there';
+  return `
+  <div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;color:#111">
+    <h2 style="margin:0 0 12px">Reset your password</h2>
+    <p style="margin:0 0 12px">Hi ${safeName},</p>
+    <p style="margin:0 0 16px">We received a request to reset your Educate The World password.
+       Click the button below to choose a new one. This link expires in 30 minutes.</p>
+    <p style="margin:0 0 20px">
+      <a href="${link}" style="display:inline-block;background:#4f46e5;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px">Reset password</a>
+    </p>
+    <p style="margin:0 0 8px;font-size:13px;color:#555">Or paste this link into your browser:</p>
+    <p style="margin:0 0 20px;font-size:12px;word-break:break-all;color:#555">${link}</p>
+    <p style="margin:0;font-size:12px;color:#888">If you didn't request this, you can safely ignore this email — your password won't change.</p>
+  </div>`;
+}
+
+const ForgotBody = z.object({ email: z.string().email() });
+
+exports.forgotPassword = async (req, res, next) => {
+  try {
+    const { email } = ForgotBody.parse(req.body);
+    const emailLc = email.toLowerCase();
+
+    // Generic response regardless of outcome — never reveal whether an account exists.
+    const generic = { ok: true, message: 'If an account exists for that email, a reset link has been sent.' };
+
+    if (_resetThrottled(emailLc)) return res.status(200).json(generic);
+
+    const user = await User.findOne({ email: emailLc }).select('+passwordHash');
+
+    // Only send for password accounts. Google-only accounts (no passwordHash) get no email.
+    if (user && user.passwordHash) {
+      const rawToken = crypto.randomBytes(32).toString('hex');
+      const tokenHash = hash(rawToken);
+      await User.updateOne(
+        { _id: user._id },
+        { $set: { resetPasswordTokenHash: tokenHash, resetPasswordExpires: new Date(Date.now() + RESET_TOKEN_TTL_MS) } }
+      );
+
+      const link = `${FRONTEND_URL}/reset-password?token=${rawToken}`;
+      try {
+        await sendEmail({
+          to: user.email,
+          subject: 'Reset your Educate The World password',
+          html: resetEmailHtml(user.name, link),
+          text: `Reset your password using this link (valid 30 minutes): ${link}`,
+        });
+      } catch (mailErr) {
+        // Don't leak mail failures to the client; log for ops.
+        console.error('[FORGOT_PASSWORD] email send failed:', mailErr?.message || mailErr);
+      }
+    }
+
+    return res.status(200).json(generic);
+  } catch (err) {
+    // Validation errors (bad email) still return generic 200 to avoid enumeration.
+    if (err?.name === 'ZodError') {
+      return res.status(200).json({ ok: true, message: 'If an account exists for that email, a reset link has been sent.' });
+    }
+    next(err);
+  }
+};
+
+const ResetBody = z.object({
+  token: z.string().min(10),
+  newPassword: z.string().min(8),
+});
+
+exports.resetPassword = async (req, res, next) => {
+  try {
+    const { token, newPassword } = ResetBody.parse(req.body);
+    const tokenHash = hash(token);
+
+    const user = await User.findOne({
+      resetPasswordTokenHash: tokenHash,
+      resetPasswordExpires: { $gt: new Date() },
+    }).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpires');
+
+    if (!user) {
+      return res.status(400).json({ code: 'INVALID_OR_EXPIRED', message: 'This reset link is invalid or has expired.' });
+    }
+
+    // Set the new password (pre-save hook bumps passwordChangedAt) and consume the token.
+    user.passwordHash = await hashPassword(newPassword);
+    user.resetPasswordTokenHash = undefined;
+    user.resetPasswordExpires = undefined;
+    await user.save();
+
+    // Log the user out everywhere: existing refresh sessions become unusable.
+    await Session.deleteMany({ userId: user._id });
+
+    return res.status(200).json({ ok: true, message: 'Password updated. You can now sign in.' });
+  } catch (err) {
+    if (err?.name === 'ZodError') {
+      return res.status(400).json({ code: 'INVALID_INPUT', message: 'Password must be at least 8 characters.' });
+    }
+    next(err);
+  }
+};
+
+exports.validateResetToken = async (req, res, next) => {
+  try {
+    const token = String(req.query.token || '');
+    if (token.length < 10) return res.status(200).json({ valid: false });
+
+    const user = await User.findOne({
+      resetPasswordTokenHash: hash(token),
+      resetPasswordExpires: { $gt: new Date() },
+    }).select('_id');
+
+    return res.status(200).json({ valid: !!user });
   } catch (err) {
     next(err);
   }
